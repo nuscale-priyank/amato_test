@@ -1,0 +1,49 @@
+# AMATO Production Requirements
+# Core dependencies for macOS compatibility
+
+# Database connectors
+mysql-connector-python==8.0.33
+psycopg2==2.9.7
+pymongo==4.4.1
+trino==0.323.0
+sqlalchemy==2.0.23
+
+# Data processing
+pandas==2.1.4
+numpy==1.26.2
+pyarrow==14.0.2
+
+# Machine Learning (Core - Working)
+scikit-learn==1.3.2
+joblib==1.3.2
+
+# Machine Learning (Advanced - Optional)
+# Uncomment these if you need advanced ML capabilities
+# Note: These may require additional system dependencies
+# xgboost==2.0.1
+# lightgbm==4.1.0
+# hdbscan==0.8.33
+# prophet==1.1.5
+
+# API and Web
+fastapi==0.104.1
+uvicorn==0.24.0
+streamlit==1.28.1
+pydantic==2.5.0
+
+# Data generation and utilities
+faker==20.1.0
+pyyaml==6.0.1
+
+# Logging and monitoring
+python-json-logger==2.0.7
+
+# Development and testing
+pytest==7.4.2
+black==23.7.0
+flake8==6.0.0
+
+# Optional: For advanced analytics
+plotly==5.17.0
+matplotlib==3.8.2
+seaborn==0.13.0

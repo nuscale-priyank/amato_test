@@ -1,0 +1,105 @@
+# AMATO Production Database Configuration
+# Multi-database setup with MySQL, PostgreSQL, MongoDB, and Trino
+
+# Trino Configuration (for unified SQL queries across all databases)
+trino:
+  host: "5.tcp.ngrok.io"
+  port: 26495
+  catalog: "hive"
+  schema: "default"
+  username: "trino"
+  password: ""
+
+# MySQL Configuration (Customer and Transaction Data)
+databases:
+  mysql:
+    host: "5.tcp.ngrok.io"
+    port: 27931
+    database: "amato"
+    username: "root"
+    password: "Password123!"
+    charset: "utf8mb4"
+    
+  postgresql:
+    host: "3.tcp.ngrok.io"
+    port: 27200
+    database: "nuscale"
+    username: "nuscaleadmin"
+    password: "Password123!"
+    schema: "amato"
+    
+  mongodb:
+    host: "3.tcp.ngrok.io"
+    port: 21923
+    database: "amato"
+    username: "nuscaleadmin"
+    password: "Password123!"
+    auth_source: "admin"
+
+# Data Pipeline Configuration
+data_pipelines:
+  # SQL Transformation Tables (stored in MySQL)
+  mysql_tables:
+    customer_rfm: "customer_rfm_data"
+    campaign_performance: "campaign_performance_data"
+    customer_journey: "customer_journey_data"
+    ab_test_results: "ab_test_results_data"
+    unified_customer: "unified_customer_dataset"
+  
+  # Parquet file storage
+  parquet_storage:
+    base_path: "data/processed"
+    customer_rfm: "customer_rfm.parquet"
+    campaign_performance: "campaign_performance.parquet"
+    customer_journey: "customer_journey.parquet"
+    ab_test_results: "ab_test_results.parquet"
+    unified_customer: "unified_customer_dataset.parquet"
+
+# ML Pipeline Configuration
+ml:
+  model_storage_path: "models"
+  feature_store_path: "features"
+  training_data_split: 0.8
+  test_data_split: 0.2
+  
+  # Model configurations
+  customer_segmentation:
+    models: ["kmeans", "hdbscan"]
+    features: ["rfm_score", "behavioral_features", "demographic_features"]
+    
+  forecasting:
+    models: ["prophet", "xgboost"]
+    features: ["time_series_features", "campaign_features"]
+    
+  journey_simulation:
+    models: ["lightgbm", "random_forest"]
+    features: ["journey_features", "conversion_features"]
+    
+  campaign_optimization:
+    models: ["xgboost", "random_forest"]
+    features: ["ab_test_features", "performance_features"]
+
+# API Configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+  workers: 4
+  
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/amato_production.log"
+  
+# Data Generation Configuration
+data_generation:
+  customers_count: 10000
+  transactions_count: 50000
+  campaigns_count: 100
+  ab_tests_count: 50
+  sessions_count: 100000
+  page_views_count: 800000
+  events_count: 600000
+  product_interactions_count: 400000
+  search_queries_count: 300000
