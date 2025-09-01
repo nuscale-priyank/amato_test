@@ -9,10 +9,17 @@ import numpy as np
 import yaml
 import logging
 import os
+import sys
 from datetime import datetime
 import pyarrow as pa
 import pyarrow.parquet as pq
 from sqlalchemy import create_engine
+from pathlib import Path
+
+# Add project root to path for imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.append(str(project_root))
+
 from utils.s3_utils import get_s3_manager
 
 # Setup logging
