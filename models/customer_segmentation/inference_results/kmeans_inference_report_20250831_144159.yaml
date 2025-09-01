@@ -1,0 +1,44 @@
+inference_info:
+  inference_date: '2025-08-31T14:41:59.174148'
+  model_name: kmeans
+  segments_found: 5
+  total_customers: 9656
+model_metadata:
+  feature_count: 36
+  performance_metrics:
+    calinski_harabasz_score: 0.0
+    silhouette_score: 0.0
+  training_date: '2025-08-31T14:41:58.967754'
+segment_characteristics:
+  0:
+    customer_count: 1586
+    kmeans_avg_frequency: 3.33
+    kmeans_avg_monetary: 5045.78
+  1:
+    customer_count: 2101
+    kmeans_avg_frequency: 3.48
+    kmeans_avg_monetary: 5388.24
+  2:
+    customer_count: 1799
+    kmeans_avg_frequency: 5.76
+    kmeans_avg_monetary: 10256.0
+  3:
+    customer_count: 1961
+    kmeans_avg_frequency: 1.79
+    kmeans_avg_monetary: 1982.91
+  4:
+    customer_count: 2209
+    kmeans_avg_frequency: 3.14
+    kmeans_avg_monetary: 4512.17
+segment_distribution:
+  0: 1586
+  1: 2101
+  2: 1799
+  3: 1961
+  4: 2209
+segment_type_distribution:
+  Segment_0: 1586
+  Segment_1: 2101
+  Segment_2: 1799
+  Segment_3: 1961
+  Segment_4: 2209

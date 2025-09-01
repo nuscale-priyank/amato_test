@@ -1,0 +1,57 @@
+high_confidence_insights:
+  high_confidence_customers: 2511
+  high_confidence_percentage: 26.004556752278376
+  threshold: !!python/object/apply:numpy.core.multiarray.scalar
+  - &id001 !!python/object/apply:numpy.dtype
+    args:
+    - f8
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - !!binary |
+    j8L1KFyP6j8=
+journey_info:
+  inference_date: '2025-08-31T15:20:23.328453'
+  model_name: journey_stage
+  total_customers: 9656
+model_metadata:
+  feature_count: 18
+  performance_metrics:
+    accuracy: N/A
+    f1_score: N/A
+    precision: N/A
+    recall: N/A
+  training_date: '2025-08-31T15:20:23.261716'
+summary_statistics:
+  avg_confidence: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    Vcu/b/QM6T8=
+  confidence_category_distribution:
+    High: 8229
+    Low: 0
+    Medium: 1381
+    Very High: 46
+  journey_stage_distribution:
+    first_time_buyer: 1191
+    loyal_customer: 2397
+    repeat_customer: 6068
+  max_confidence: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    w/UoXI/C7T8=
+  min_confidence: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    KVyPwvUo5D8=
+  most_common_stage: repeat_customer
+  stage_diversity: 3
+  total_customers: 9656

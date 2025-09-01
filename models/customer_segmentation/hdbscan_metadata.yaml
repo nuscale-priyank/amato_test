@@ -1,0 +1,84 @@
+feature_columns:
+- recency_days
+- frequency
+- monetary_value
+- recency_score
+- frequency_score
+- monetary_score
+- rfm_score
+- customer_lifetime_value
+- total_sessions
+- avg_session_duration
+- total_page_views
+- purchase_events
+- add_to_cart_events
+- total_search_queries
+- product_views
+- unique_products_viewed
+- engagement_score
+- cart_behavior
+- session_intensity
+- conversion_efficiency
+- purchase_velocity
+- engagement_score_normalized
+- session_intensity
+- conversion_efficiency
+- search_intensity
+- product_exploration
+- cart_behavior
+- rfm_composite
+- value_engagement_ratio
+- churn_risk
+- upsell_potential
+- lifetime_value_potential
+- is_high_value
+- is_engaged
+- is_mobile_user
+- is_return_visitor
+model_name: hdbscan
+model_type: HDBSCAN
+performance_metrics:
+  calinski_harabasz_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - &id001 !!python/object/apply:numpy.dtype
+    args:
+    - f8
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - !!binary |
+    L/w7BxLQXkA=
+  silhouette_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    EJlTcU8qt78=
+segment_summary:
+- avg_frequency: 3.6594561186650187
+  avg_monetary_value: 5753.187637515452
+  avg_recency_days: 99.1535846724351
+  customer_count: 6472
+  engagement_score: 79.77441285537701
+  segment: -1
+  segment_type: Standard
+- avg_frequency: 2.786634180299339
+  avg_monetary_value: 4076.037901148625
+  avg_recency_days: 98.52175426383572
+  customer_count: 2873
+  engagement_score: 80.0
+  segment: 1
+  segment_type: Standard
+- avg_frequency: 5.488745980707395
+  avg_monetary_value: 8632.249807073955
+  avg_recency_days: 33.58199356913183
+  customer_count: 311
+  engagement_score: 80.0
+  segment: 0
+  segment_type: Engaged Regular
+training_date: '2025-08-31T14:17:57.288490'

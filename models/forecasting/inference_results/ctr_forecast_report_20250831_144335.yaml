@@ -1,0 +1,67 @@
+forecast_info:
+  forecast_date: '2025-08-31T14:43:35.071347'
+  forecast_period: next_campaign
+  model_name: ctr
+  total_customers: 9656
+high_value_insights:
+  avg_high_value: !!python/object/apply:numpy.core.multiarray.scalar
+  - &id001 !!python/object/apply:numpy.dtype
+    args:
+    - f8
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - !!binary |
+    +AIjWe50oT8=
+  high_value_customers: 6867
+  high_value_percentage: 71.11640430820215
+  threshold: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    +AIjWe50oT8=
+model_metadata:
+  feature_count: 10
+  performance_metrics:
+    mae: 0.0
+    r2: 0.0
+    rmse: 0.0
+  training_date: '2025-08-31T14:43:34.965251'
+prediction_distribution:
+  25%: 0.03333333333333357
+  50%: 0.034095238095238345
+  75%: 0.034095238095238345
+  count: 9656.0
+  max: 0.034095238095238345
+  mean: 0.03387517260425321
+  min: 0.03333333333333357
+  std: 0.0003453295169553325
+summary_statistics:
+  avg_prediction: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    QJf2LBZYoT8=
+  max_prediction: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    +AIjWe50oT8=
+  min_prediction: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    MxERERERoT8=
+  std_prediction: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    GoFO+6qhNj8=
+  total_customers: 9656
+  total_predicted_value: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    yKh/I5RxdEA=

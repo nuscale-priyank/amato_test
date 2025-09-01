@@ -13,7 +13,7 @@ import os
 from datetime import datetime, timedelta
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, mean_absolute_error, mean_squared_error, r2_score, roc_auc_score
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -35,7 +35,7 @@ class JourneySimulationPipeline:
         """Load unified dataset for journey simulation"""
         try:
             # Load from parquet file
-            data_path = 'data/processed/unified_customer_dataset.parquet'
+            data_path = 'data_pipelines/unified_dataset/output/unified_customer_dataset.parquet'
             if os.path.exists(data_path):
                 df = pd.read_parquet(data_path)
                 logger.info(f"Loaded unified dataset: {df.shape}")
@@ -61,13 +61,13 @@ class JourneySimulationPipeline:
         df['engagement_score'] = (df['total_page_views'] * 0.3 + df['total_events'] * 0.4 + df['total_interactions'] * 0.3)
         
         # Create time-based features
-        df['days_since_first_visit'] = (pd.Timestamp.now() - pd.to_datetime(df['first_visit_date'])).dt.days
+        df['days_since_first_visit'] = (pd.Timestamp.now() - pd.to_datetime(df['registration_date'])).dt.days
         df['visit_frequency'] = df['total_sessions'] / df['days_since_first_visit'].replace(0, 1)
         
         # Create product interaction features
-        df['avg_product_views'] = df['total_product_views'] / df['total_sessions'].replace(0, 1)
-        df['cart_add_rate'] = df['total_cart_adds'] / df['total_product_views'].replace(0, 1)
-        df['purchase_rate'] = df['total_transactions'] / df['total_cart_adds'].replace(0, 1)
+        df['avg_product_views'] = df['product_views'] / df['total_sessions'].replace(0, 1)
+        df['cart_add_rate'] = df['cart_adds'] / df['product_views'].replace(0, 1)
+        df['purchase_rate'] = df['frequency'] / df['cart_adds'].replace(0, 1)
         
         # Fill NaN values
         df = df.fillna(0)
@@ -76,17 +76,17 @@ class JourneySimulationPipeline:
     
     def calculate_journey_stage(self, row):
         """Calculate customer journey stage"""
-        if row['total_transactions'] > 0:
-            if row['total_transactions'] >= 5:
+        if row['frequency'] > 0:
+            if row['frequency'] >= 5:
                 return 'loyal_customer'
-            elif row['total_transactions'] >= 2:
+            elif row['frequency'] >= 2:
                 return 'repeat_customer'
             else:
                 return 'first_time_buyer'
         else:
-            if row['total_cart_adds'] > 0:
+            if row['cart_adds'] > 0:
                 return 'cart_abandoner'
-            elif row['total_product_views'] > 0:
+            elif row['product_views'] > 0:
                 return 'product_browser'
             else:
                 return 'visitor'
@@ -112,9 +112,9 @@ class JourneySimulationPipeline:
             base_prob += 0.1
         
         # Product interaction influence
-        if row['total_product_views'] > 5:
+        if row['product_views'] > 5:
             base_prob += 0.1
-        if row['total_cart_adds'] > 0:
+        if row['cart_adds'] > 0:
             base_prob += 0.2
         
         return min(base_prob, 0.95)
@@ -125,12 +125,12 @@ class JourneySimulationPipeline:
         
         # Prepare features for journey stage prediction
         stage_features = [
-            'rfm_score', 'total_transactions', 'avg_order_value', 'days_since_last_purchase',
+            'rfm_score', 'frequency', 'avg_order_value', 'days_since_last_purchase',
             'total_sessions', 'total_page_views', 'total_events', 'total_interactions',
-            'total_product_views', 'total_cart_adds', 'customer_age_days',
-            'avg_session_duration', 'bounce_rate', 'engagement_score',
-            'days_since_first_visit', 'visit_frequency',
-            'avg_product_views', 'cart_add_rate', 'purchase_rate'
+            'product_views', 'cart_adds', 'customer_age_days',
+            'avg_session_duration', 'engagement_score',
+            'purchase_velocity', 'session_intensity',
+            'conversion_efficiency', 'search_intensity', 'product_exploration'
         ]
         
         # Filter out rows with missing target
@@ -178,12 +178,12 @@ class JourneySimulationPipeline:
         
         # Prepare features for conversion prediction
         conversion_features = [
-            'rfm_score', 'total_transactions', 'avg_order_value', 'days_since_last_purchase',
+            'rfm_score', 'frequency', 'avg_order_value', 'days_since_last_purchase',
             'total_sessions', 'total_page_views', 'total_events', 'total_interactions',
-            'total_product_views', 'total_cart_adds', 'customer_age_days',
-            'avg_session_duration', 'bounce_rate', 'engagement_score',
-            'days_since_first_visit', 'visit_frequency',
-            'avg_product_views', 'cart_add_rate', 'purchase_rate'
+            'product_views', 'cart_adds', 'customer_age_days',
+            'avg_session_duration', 'engagement_score',
+            'purchase_velocity', 'session_intensity',
+            'conversion_efficiency', 'search_intensity', 'product_exploration'
         ]
         
         # Filter out rows with missing target

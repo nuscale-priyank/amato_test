@@ -66,10 +66,10 @@ class CustomerSegmentationPipeline:
             
             # Behavioral Features
             'total_sessions', 'avg_session_duration', 'total_page_views',
-            'conversion_events', 'add_to_cart_events', 'search_queries',
-            'product_interactions', 'unique_products_viewed',
-            'avg_engagement_score', 'cart_abandonment_rate',
-            'bounce_rate', 'return_visitor_rate',
+            'purchase_events', 'add_to_cart_events', 'total_search_queries',
+            'product_views', 'unique_products_viewed',
+            'engagement_score', 'cart_behavior',
+            'session_intensity', 'conversion_efficiency',
             
             # Engineered Features
             'purchase_velocity', 'engagement_score_normalized',
@@ -174,7 +174,13 @@ class CustomerSegmentationPipeline:
         # Get predictions
         X = df_features[self.feature_columns].values
         X_scaled = self.scaler.transform(X)
-        predictions = model.predict(X_scaled)
+        
+        # Handle different model types
+        if hasattr(model, 'predict'):
+            predictions = model.predict(X_scaled)
+        else:
+            # For HDBSCAN, use the labels from training
+            predictions = model.labels_
         
         # Add predictions to dataframe
         df_analysis = df_features.copy()
@@ -185,7 +191,7 @@ class CustomerSegmentationPipeline:
             'monetary_value': ['mean', 'std', 'count'],
             'frequency': ['mean', 'std'],
             'recency_days': ['mean', 'std'],
-            'avg_engagement_score': ['mean', 'std'],
+            'engagement_score': ['mean', 'std'],
             'customer_lifetime_value': ['mean', 'std'],
             'churn_risk': ['mean', 'std'],
             'upsell_potential': ['mean', 'std']
@@ -203,7 +209,7 @@ class CustomerSegmentationPipeline:
             avg_monetary = segment_data['monetary_value'].mean()
             avg_frequency = segment_data['frequency'].mean()
             avg_recency = segment_data['recency_days'].mean()
-            avg_engagement = segment_data['avg_engagement_score'].mean()
+            avg_engagement = segment_data['engagement_score'].mean()
             
             if avg_monetary > 2000 and avg_frequency > 10:
                 segment_type = "High-Value Loyal"
@@ -225,7 +231,7 @@ class CustomerSegmentationPipeline:
                 'avg_monetary_value': avg_monetary,
                 'avg_frequency': avg_frequency,
                 'avg_recency_days': avg_recency,
-                'avg_engagement_score': avg_engagement
+                'engagement_score': avg_engagement
             })
         
         segment_summary = pd.DataFrame(segment_characteristics)
@@ -267,13 +273,13 @@ class CustomerSegmentationPipeline:
         segment_means = df_analysis.groupby(f'{model_name}_segment').agg({
             'monetary_value': 'mean',
             'frequency': 'mean',
-            'avg_engagement_score': 'mean',
+            'engagement_score': 'mean',
             'customer_lifetime_value': 'mean',
             'purchase_velocity': 'mean'
         }).reset_index()
         
         # Normalize values for radar chart
-        for col in ['monetary_value', 'frequency', 'avg_engagement_score', 'customer_lifetime_value', 'purchase_velocity']:
+        for col in ['monetary_value', 'frequency', 'engagement_score', 'customer_lifetime_value', 'purchase_velocity']:
             segment_means[f'{col}_normalized'] = (segment_means[col] - segment_means[col].min()) / (segment_means[col].max() - segment_means[col].min())
         
         fig_radar = go.Figure()
@@ -281,7 +287,7 @@ class CustomerSegmentationPipeline:
         for _, row in segment_means.iterrows():
             fig_radar.add_trace(go.Scatterpolar(
                 r=[row['monetary_value_normalized'], row['frequency_normalized'], 
-                   row['avg_engagement_score_normalized'], row['customer_lifetime_value_normalized'],
+                   row['engagement_score_normalized'], row['customer_lifetime_value_normalized'],
                    row['purchase_velocity_normalized']],
                 theta=['Monetary', 'Frequency', 'Engagement', 'CLV', 'Velocity'],
                 fill='toself',
@@ -335,9 +341,7 @@ class CustomerSegmentationPipeline:
         
         # Save feature importance/characteristics
         feature_importance = pd.DataFrame({
-            'feature': self.feature_columns,
-            'mean': self.scaler.mean_,
-            'std': self.scaler.scale_
+            'feature': self.feature_columns
         })
         feature_importance.to_csv(os.path.join(output_dir, 'feature_characteristics.csv'), index=False)
         

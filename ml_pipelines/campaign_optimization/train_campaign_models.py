@@ -13,7 +13,7 @@ import os
 from datetime import datetime, timedelta
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, mean_absolute_error, mean_squared_error, r2_score, roc_auc_score
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -35,7 +35,7 @@ class CampaignOptimizationPipeline:
         """Load unified dataset for campaign optimization"""
         try:
             # Load from parquet file
-            data_path = 'data/processed/unified_customer_dataset.parquet'
+            data_path = 'data_pipelines/unified_dataset/output/unified_customer_dataset.parquet'
             if os.path.exists(data_path):
                 df = pd.read_parquet(data_path)
                 logger.info(f"Loaded unified dataset: {df.shape}")
@@ -52,10 +52,10 @@ class CampaignOptimizationPipeline:
         logger.info("Preparing campaign optimization features...")
         
         # Create campaign performance features
-        df['campaign_roas'] = df['total_revenue'] / df['campaign_spend'].replace(0, 1)
-        df['campaign_cpa'] = df['campaign_spend'] / df['total_conversions'].replace(0, 1)
-        df['campaign_ctr'] = df['clicks'] / df['impressions'].replace(0, 1)
-        df['campaign_cvr'] = df['conversions'] / df['clicks'].replace(0, 1)
+        df['campaign_roas'] = df['avg_roas']  # Use existing ROAS data
+        df['campaign_cpa'] = df['total_campaign_revenue'] / df['campaign_count'].replace(0, 1)  # Simplified CPA
+        df['campaign_ctr'] = df['avg_ctr']  # Use existing CTR data
+        df['campaign_cvr'] = df['campaign_response_rate']  # Use response rate as conversion rate
         
         # Create campaign success indicators
         df['campaign_success'] = df.apply(self.calculate_campaign_success, axis=1)
@@ -66,9 +66,9 @@ class CampaignOptimizationPipeline:
         df['optimal_campaign_budget'] = df.apply(self.calculate_optimal_budget, axis=1)
         
         # Create seasonal features
-        df['campaign_month'] = pd.to_datetime(df['campaign_start_date']).dt.month
-        df['campaign_quarter'] = pd.to_datetime(df['campaign_start_date']).dt.quarter
-        df['campaign_day_of_week'] = pd.to_datetime(df['campaign_start_date']).dt.dayofweek
+        df['campaign_month'] = pd.to_datetime(df['registration_date']).dt.month
+        df['campaign_quarter'] = pd.to_datetime(df['registration_date']).dt.quarter
+        df['campaign_day_of_week'] = pd.to_datetime(df['registration_date']).dt.dayofweek
         
         # Create targeting features
         df['target_audience_match'] = df.apply(self.calculate_target_audience_match, axis=1)
@@ -104,17 +104,15 @@ class CampaignOptimizationPipeline:
             success_score += 1
         
         # Budget efficiency
-        if row['campaign_spend'] < 1000 and row['total_revenue'] > 2000:
+        if row['campaign_count'] < 5 and row['total_campaign_revenue'] > 2000:
             success_score += 1
         
         return 'high' if success_score >= 6 else 'medium' if success_score >= 3 else 'low'
     
     def calculate_ab_test_winner(self, row):
         """Calculate A/B test winner based on performance"""
-        if row['ab_test_variant'] == 'A':
-            return 'A' if row['campaign_ctr'] > 0.04 and row['campaign_cvr'] > 0.02 else 'B'
-        else:
-            return 'B' if row['campaign_ctr'] > 0.04 and row['campaign_cvr'] > 0.02 else 'A'
+        # Simplified A/B test winner calculation
+        return 'A' if row['campaign_ctr'] > 0.04 and row['campaign_cvr'] > 0.02 else 'B'
     
     def calculate_customer_campaign_affinity(self, row):
         """Calculate customer-campaign affinity score"""
@@ -130,8 +128,8 @@ class CampaignOptimizationPipeline:
         if row['campaign_type'] in ['Email', 'Social Media'] and row['total_sessions'] > 10:
             affinity += 0.1
         
-        # Channel preference
-        if row['campaign_channel'] in ['Facebook', 'Google'] and row['total_events'] > 5:
+        # Channel preference (simplified)
+        if row['total_events'] > 5:
             affinity += 0.1
         
         return min(affinity, 1.0)
@@ -141,9 +139,9 @@ class CampaignOptimizationPipeline:
         base_budget = 100
         
         # Customer value influence
-        if row['total_revenue'] > 1000:
+        if row['total_campaign_revenue'] > 1000:
             base_budget += 200
-        elif row['total_revenue'] > 500:
+        elif row['total_campaign_revenue'] > 500:
             base_budget += 100
         
         # RFM score influence
@@ -171,7 +169,7 @@ class CampaignOptimizationPipeline:
             match_score += 0.2
         
         # High value customer match
-        if row['target_audience'] == 'High Value' and row['total_revenue'] > 500:
+        if row['target_audience'] == 'High Value' and row['total_campaign_revenue'] > 500:
             match_score += 0.2
         
         return min(match_score, 1.0)
@@ -180,13 +178,13 @@ class CampaignOptimizationPipeline:
         """Calculate channel effectiveness score"""
         effectiveness = 0.5
         
-        # Channel-specific performance
-        if row['campaign_channel'] == 'Facebook' and row['campaign_ctr'] > 0.03:
+        # Simplified channel effectiveness based on performance metrics
+        if row['campaign_ctr'] > 0.03:
             effectiveness += 0.2
-        elif row['campaign_channel'] == 'Google' and row['campaign_cvr'] > 0.02:
+        if row['campaign_cvr'] > 0.02:
             effectiveness += 0.2
-        elif row['campaign_channel'] == 'Email' and row['campaign_cvr'] > 0.05:
-            effectiveness += 0.2
+        if row['campaign_roas'] > 2.0:
+            effectiveness += 0.1
         
         return min(effectiveness, 1.0)
     
@@ -196,8 +194,8 @@ class CampaignOptimizationPipeline:
         
         # Prepare features for campaign success prediction
         success_features = [
-            'rfm_score', 'total_transactions', 'avg_order_value', 'days_since_last_purchase',
-            'campaign_spend', 'impressions', 'clicks', 'conversions', 'total_revenue',
+            'rfm_score', 'frequency', 'avg_order_value', 'days_since_last_purchase',
+            'campaign_count', 'total_campaign_revenue', 'avg_roas', 'avg_ctr',
             'campaign_roas', 'campaign_cpa', 'campaign_ctr', 'campaign_cvr',
             'customer_campaign_affinity', 'target_audience_match', 'channel_effectiveness',
             'campaign_month', 'campaign_quarter', 'campaign_day_of_week'
@@ -248,8 +246,8 @@ class CampaignOptimizationPipeline:
         
         # Prepare features for budget optimization
         budget_features = [
-            'rfm_score', 'total_transactions', 'avg_order_value', 'days_since_last_purchase',
-            'campaign_spend', 'impressions', 'clicks', 'conversions', 'total_revenue',
+            'rfm_score', 'frequency', 'avg_order_value', 'days_since_last_purchase',
+            'campaign_count', 'total_campaign_revenue', 'avg_roas', 'avg_ctr',
             'campaign_roas', 'campaign_cpa', 'campaign_ctr', 'campaign_cvr',
             'customer_campaign_affinity', 'target_audience_match', 'channel_effectiveness',
             'campaign_month', 'campaign_quarter', 'campaign_day_of_week'

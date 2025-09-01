@@ -1,0 +1,98 @@
+feature_columns:
+- recency_days
+- frequency
+- monetary_value
+- recency_score
+- frequency_score
+- monetary_score
+- rfm_score
+- customer_lifetime_value
+- total_sessions
+- avg_session_duration
+- total_page_views
+- purchase_events
+- add_to_cart_events
+- total_search_queries
+- product_views
+- unique_products_viewed
+- engagement_score
+- cart_behavior
+- session_intensity
+- conversion_efficiency
+- purchase_velocity
+- engagement_score_normalized
+- session_intensity
+- conversion_efficiency
+- search_intensity
+- product_exploration
+- cart_behavior
+- rfm_composite
+- value_engagement_ratio
+- churn_risk
+- upsell_potential
+- lifetime_value_potential
+- is_high_value
+- is_engaged
+- is_mobile_user
+- is_return_visitor
+model_name: kmeans
+model_type: KMeans
+performance_metrics:
+  calinski_harabasz_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - &id001 !!python/object/apply:numpy.dtype
+    args:
+    - f8
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - !!binary |
+    NK1t8V1hjUA=
+  silhouette_score: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    YHutaCIquj8=
+segment_summary:
+- avg_frequency: 5.764313507504169
+  avg_monetary_value: 10255.998682601446
+  avg_recency_days: 34.67037242912729
+  customer_count: 1799
+  engagement_score: 79.93329627570873
+  segment: 2
+  segment_type: Engaged Regular
+- avg_frequency: 3.332282471626734
+  avg_monetary_value: 5045.777168978562
+  avg_recency_days: 73.09268600252207
+  customer_count: 1586
+  engagement_score: 79.87389659520807
+  segment: 0
+  segment_type: Standard
+- avg_frequency: 3.4754878629224177
+  avg_monetary_value: 5388.240142789148
+  avg_recency_days: 76.44074250356972
+  customer_count: 2101
+  engagement_score: 79.56211327939077
+  segment: 1
+  segment_type: Standard
+- avg_frequency: 3.141240380262562
+  avg_monetary_value: 4512.170909913988
+  avg_recency_days: 78.80081484834767
+  customer_count: 2209
+  engagement_score: 80.0
+  segment: 4
+  segment_type: Standard
+- avg_frequency: 1.7853136155022948
+  avg_monetary_value: 1982.9141611422742
+  avg_recency_days: 215.323304436512
+  customer_count: 1961
+  engagement_score: 79.88781234064253
+  segment: 3
+  segment_type: At Risk
+training_date: '2025-08-31T14:17:57.284185'

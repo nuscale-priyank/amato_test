@@ -48,7 +48,7 @@ data_pipelines:
   
   # Parquet file storage
   parquet_storage:
-    base_path: "data/processed"
+    base_path: "data_pipelines/unified_dataset/output"
     customer_rfm: "customer_rfm.parquet"
     campaign_performance: "campaign_performance.parquet"
     customer_journey: "customer_journey.parquet"

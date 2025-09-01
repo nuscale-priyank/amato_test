@@ -1,0 +1,47 @@
+high_confidence_insights:
+  high_confidence_customers: 2874
+  high_confidence_percentage: 29.76387738193869
+  threshold: !!python/object/apply:numpy.core.multiarray.scalar
+  - &id001 !!python/object/apply:numpy.dtype
+    args:
+    - f8
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - !!binary |
+    rkfhehSu7z8=
+journey_info:
+  inference_date: '2025-08-31T14:37:53.664204'
+  model_name: journey_stage
+  total_customers: 9656
+model_metadata:
+  feature_count: 18
+  performance_metrics:
+    accuracy: 0.0
+    f1_score: 0.0
+    precision: 0.0
+    recall: 0.0
+  training_date: '2025-08-31T14:37:53.581432'
+summary_statistics:
+  avg_confidence: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    AzYeyVot7z8=
+  max_confidence: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    AAAAAAAA8D8=
+  min_confidence: !!python/object/apply:numpy.core.multiarray.scalar
+  - *id001
+  - !!binary |
+    9ihcj8L16D8=
+  stage_distribution: {}
+  total_customers: 9656
