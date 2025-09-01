@@ -52,13 +52,33 @@ logs/
 *.sqlite
 *.sqlite3
 
-# Model files (optional - uncomment if you don't want to track models)
-# models/*.pkl
-# models/*.joblib
+# Model files and results - DO NOT TRACK
+models/*.pkl
+models/*.joblib
+models/*.h5
+models/*.onnx
+models/*.pb
 
-# Data files (optional - uncomment if you don't want to track data)
-# data_pipelines/unified_dataset/output/*.parquet
-# data_pipelines/unified_dataset/output/*.yaml
+# Model inference results and outputs
+models/*/inference_results/
+models/batch_inference_results/
+models/*/visualizations/
+
+# Data files and outputs
+data_pipelines/unified_dataset/output/*.parquet
+data_pipelines/unified_dataset/output/*.yaml
+data_pipelines/unified_dataset/output/*.csv
+
+# Generated reports and visualizations
+*.html
+*.yaml
+*.parquet
+*.csv
+!requirements.txt
+!config/*.yaml
+!data_pipelines/sql_transformations/*.sql
+!ddl/*.sql
+!ddl/*.js
 
 # Environment variables
 .env
@@ -75,3 +95,21 @@ tmp/
 *.backup
 *.bak
 *.tar.gz
+
+# Jupyter notebooks (optional - uncomment if you don't want to track notebooks)
+# *.ipynb
+# .ipynb_checkpoints/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
