@@ -15,6 +15,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import warnings
+from utils.s3_utils import get_s3_manager
 warnings.filterwarnings('ignore')
 
 # Setup logging
@@ -124,6 +125,12 @@ class ForecastingPipeline:
         model_path = os.path.join(self.models_path, 'revenue_forecasting_model.pkl')
         joblib.dump(model, model_path)
         logger.info(f"✅ Revenue forecasting model saved to {model_path}")
+        # Upload to S3
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.upload_file(model_path, "models/forecasting")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload revenue model to S3: {e}")
         
         return model
     
@@ -173,6 +180,12 @@ class ForecastingPipeline:
         model_path = os.path.join(self.models_path, 'ctr_forecasting_model.pkl')
         joblib.dump(model, model_path)
         logger.info(f"✅ CTR forecasting model saved to {model_path}")
+        # Upload to S3
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.upload_file(model_path, "models/forecasting")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload CTR model to S3: {e}")
         
         return model
     

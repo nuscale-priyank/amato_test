@@ -20,6 +20,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from utils.s3_utils import get_s3_manager
 from datetime import datetime
 from pathlib import Path
 
@@ -71,7 +72,12 @@ class JourneySimulationBatchInference:
     def load_trained_models(self):
         """Load trained journey simulation models and metadata."""
         logger.info("📥 Loading trained journey simulation models...")
-        
+        # Pull latest models from S3
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.download_latest_by_suffix("models/journey_simulation", "models/journey_simulation", [".pkl"])
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to download latest journey models from S3: {e}")
         try:
             # Load models
             model_files = {
@@ -342,6 +348,13 @@ class JourneySimulationBatchInference:
         
         logger.info(f"✅ Results saved to {results_file}")
         logger.info(f"✅ Report saved to {report_file}")
+        # Upload to S3 directly
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.upload_file(results_file, "models/journey_simulation/inference_results")
+            s3_manager.upload_file(report_file, "models/journey_simulation/inference_results")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload journey outputs to S3: {e}")
         
         return results_file, report_file
     
@@ -362,7 +375,8 @@ class JourneySimulationBatchInference:
                 names=results['predicted_journey_stage'].value_counts().index,
                 title='Customer Journey Stage Distribution'
             )
-            fig1.write_html(os.path.join(output_dir, f'{model_name}_stage_distribution_{timestamp}.html'))
+            html1 = os.path.join(output_dir, f'{model_name}_stage_distribution_{timestamp}.html')
+            fig1.write_html(html1)
             
             # Stage confidence distribution
             fig2 = px.histogram(
@@ -371,7 +385,8 @@ class JourneySimulationBatchInference:
                 title='Journey Stage Prediction Confidence Distribution',
                 nbins=30
             )
-            fig2.write_html(os.path.join(output_dir, f'{model_name}_confidence_distribution_{timestamp}.html'))
+            html2 = os.path.join(output_dir, f'{model_name}_confidence_distribution_{timestamp}.html')
+            fig2.write_html(html2)
             
         else:
             # Conversion probability distribution
@@ -381,7 +396,8 @@ class JourneySimulationBatchInference:
                 title='Conversion Probability Distribution',
                 nbins=30
             )
-            fig1.write_html(os.path.join(output_dir, f'{model_name}_conversion_distribution_{timestamp}.html'))
+            html3 = os.path.join(output_dir, f'{model_name}_conversion_distribution_{timestamp}.html')
+            fig1.write_html(html3)
             
             # Conversion category distribution
             fig2 = px.pie(
@@ -389,7 +405,15 @@ class JourneySimulationBatchInference:
                 names=results['conversion_category'].value_counts().index,
                 title='Conversion Category Distribution'
             )
-            fig2.write_html(os.path.join(output_dir, f'{model_name}_conversion_categories_{timestamp}.html'))
+            html4 = os.path.join(output_dir, f'{model_name}_conversion_categories_{timestamp}.html')
+            fig2.write_html(html4)
+        # Upload visualizations to S3
+        try:
+            s3_manager = get_s3_manager()
+            for f in [html1, html2, html3, html4]:
+                s3_manager.upload_file(f, "models/journey_simulation/inference_results")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload journey visualizations to S3: {e}")
         
         logger.info(f"✅ Visualizations saved to {output_dir}")
     

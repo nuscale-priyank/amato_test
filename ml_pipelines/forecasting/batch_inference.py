@@ -13,6 +13,7 @@ import joblib
 from datetime import datetime, timedelta
 import plotly.express as px
 import plotly.graph_objects as go
+from utils.s3_utils import get_s3_manager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +34,12 @@ class ForecastingBatchInference:
     def load_trained_models(self):
         """Load trained forecasting models"""
         logger.info("📥 Loading trained forecasting models...")
-        
+        # Pull latest models from S3
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.download_latest_by_suffix("models/forecasting", "models/forecasting", [".pkl"])
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to download latest forecasting models from S3: {e}")
         model_dir = os.path.join(self.config['ml']['model_storage_path'], 'forecasting')
         
         if not os.path.exists(model_dir):
@@ -241,6 +247,12 @@ class ForecastingBatchInference:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         results_file = os.path.join(output_dir, f'{model_name}_forecast_results_{timestamp}.parquet')
         results.to_parquet(results_file, index=False)
+        # Upload results to S3 directly
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.upload_file(results_file, "models/forecasting/inference_results")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload forecasting results to S3: {e}")
         
         # Save report
         report = self.generate_forecast_report(results, model_name)
@@ -277,7 +289,8 @@ class ForecastingBatchInference:
             title=title,
             nbins=50
         )
-        fig1.write_html(os.path.join(output_dir, f'{model_name}_forecast_distribution_{timestamp}.html'))
+        html1 = os.path.join(output_dir, f'{model_name}_forecast_distribution_{timestamp}.html')
+        fig1.write_html(html1)
         
         # Prediction vs customer count
         fig2 = px.scatter(
@@ -286,7 +299,15 @@ class ForecastingBatchInference:
             title=f'{model_name.upper()} Forecast by Customer Rank',
             labels={'x': 'Customer Rank', 'y': prediction_col.replace('_', ' ').title()}
         )
-        fig2.write_html(os.path.join(output_dir, f'{model_name}_forecast_rank_{timestamp}.html'))
+        html2 = os.path.join(output_dir, f'{model_name}_forecast_rank_{timestamp}.html')
+        fig2.write_html(html2)
+        # Upload visualizations to S3
+        try:
+            s3_manager = get_s3_manager()
+            for f in [html1, html2]:
+                s3_manager.upload_file(f, "models/forecasting/inference_results")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload forecasting visualizations to S3: {e}")
         
         logger.info(f"✅ Visualizations saved to {output_dir}")
     

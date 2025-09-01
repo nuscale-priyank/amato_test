@@ -15,6 +15,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, mean_absolute_error, mean_squared_error, r2_score, roc_auc_score
 import warnings
+from utils.s3_utils import get_s3_manager
 warnings.filterwarnings('ignore')
 
 # Setup logging
@@ -169,6 +170,12 @@ class JourneySimulationPipeline:
         model_path = os.path.join(self.models_path, 'journey_stage_model.pkl')
         joblib.dump(model, model_path)
         logger.info(f"✅ Journey stage model saved to {model_path}")
+        # Upload to S3
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.upload_file(model_path, "models/journey_simulation")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload journey stage model to S3: {e}")
         
         return model
     
@@ -220,6 +227,12 @@ class JourneySimulationPipeline:
         model_path = os.path.join(self.models_path, 'conversion_prediction_model.pkl')
         joblib.dump(model, model_path)
         logger.info(f"✅ Conversion prediction model saved to {model_path}")
+        # Upload to S3
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.upload_file(model_path, "models/journey_simulation")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload conversion model to S3: {e}")
         
         return model
     

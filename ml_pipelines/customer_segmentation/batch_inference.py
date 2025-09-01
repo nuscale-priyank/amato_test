@@ -15,6 +15,7 @@ from sklearn.preprocessing import StandardScaler
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from utils.s3_utils import get_s3_manager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -35,7 +36,12 @@ class CustomerSegmentationBatchInference:
     def load_trained_models(self):
         """Load trained models and metadata"""
         logger.info("📥 Loading trained segmentation models...")
-        
+        # Pull latest models from S3
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.download_latest_by_suffix("models/customer_segmentation", "models/customer_segmentation", [".pkl"])
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to download latest segmentation models from S3: {e}")
         model_dir = os.path.join(self.config['ml']['model_storage_path'], 'customer_segmentation')
         
         if not os.path.exists(model_dir):
@@ -238,6 +244,12 @@ class CustomerSegmentationBatchInference:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         results_file = os.path.join(output_dir, f'{model_name}_inference_results_{timestamp}.parquet')
         results.to_parquet(results_file, index=False)
+        # Upload results and report to S3 directly
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.upload_file(results_file, "models/customer_segmentation/inference_results")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload segmentation results to S3: {e}")
         
         # Save report
         report = self.generate_inference_report(results, model_name)
@@ -247,6 +259,13 @@ class CustomerSegmentationBatchInference:
         
         logger.info(f"✅ Results saved to {results_file}")
         logger.info(f"✅ Report saved to {report_file}")
+        # Upload to S3 directly
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.upload_file(results_file, "models/customer_segmentation/inference_results")
+            s3_manager.upload_file(report_file, "models/customer_segmentation/inference_results")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload segmentation outputs to S3: {e}")
         
         return results_file, report_file
     
@@ -267,7 +286,8 @@ class CustomerSegmentationBatchInference:
             title=f'{model_name.upper()} Segment Distribution',
             labels={'x': 'Segment ID', 'y': 'Customer Count'}
         )
-        fig1.write_html(os.path.join(output_dir, f'{model_name}_segment_distribution_{timestamp}.html'))
+        html1 = os.path.join(output_dir, f'{model_name}_segment_distribution_{timestamp}.html')
+        fig1.write_html(html1)
         
         # Segment type distribution
         fig2 = px.pie(
@@ -275,7 +295,15 @@ class CustomerSegmentationBatchInference:
             names=results[f'{model_name}_segment_type'].value_counts().index,
             title=f'{model_name.upper()} Segment Type Distribution'
         )
-        fig2.write_html(os.path.join(output_dir, f'{model_name}_segment_types_{timestamp}.html'))
+        html2 = os.path.join(output_dir, f'{model_name}_segment_types_{timestamp}.html')
+        fig2.write_html(html2)
+        # Upload visualizations to S3 directly
+        try:
+            s3_manager = get_s3_manager()
+            for f in [html1, html2]:
+                s3_manager.upload_file(f, "models/customer_segmentation/inference_results")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload segmentation visualizations to S3: {e}")
         
         logger.info(f"✅ Visualizations saved to {output_dir}")
     

@@ -13,6 +13,7 @@ from datetime import datetime
 import pyarrow as pa
 import pyarrow.parquet as pq
 from sqlalchemy import create_engine
+from utils.s3_utils import get_s3_manager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -459,6 +460,13 @@ class UnifiedDatasetCreator:
             
             # Generate report
             report = self.generate_dataset_report(df_unified)
+            
+            # Sync outputs to S3
+            try:
+                s3_manager = get_s3_manager()
+                s3_manager.sync_data_to_s3("data_pipelines/unified_dataset/output")
+            except Exception as sync_err:
+                logger.warning(f"⚠️  Failed to sync unified dataset outputs to S3: {sync_err}")
             
             logger.info("=" * 60)
             logger.info("🎉 UNIFIED DATASET CREATION COMPLETED!")

@@ -8,6 +8,7 @@ import logging
 import os
 from datetime import datetime
 import yaml
+from utils.s3_utils import get_s3_manager
 
 # Import batch inference classes
 from ml_pipelines.customer_segmentation.batch_inference import CustomerSegmentationBatchInference
@@ -175,6 +176,13 @@ class MasterBatchInferenceOrchestrator:
         logger.info("=" * 80)
         
         try:
+            # Pull latest models and unified dataset from S3
+            try:
+                s3_manager = get_s3_manager()
+                s3_manager.load_models_from_s3("models")
+                s3_manager.load_data_from_s3("data_pipelines/unified_dataset/output")
+            except Exception as sync_err:
+                logger.warning(f"⚠️  Failed to load from S3, proceeding with local artifacts if present: {sync_err}")
             # Run all inference pipelines
             self.run_customer_segmentation_inference(data_path)
             self.run_forecasting_inference(data_path)
@@ -192,6 +200,12 @@ class MasterBatchInferenceOrchestrator:
             logger.info(f"📈 Total predictions: {master_report['master_inference_info']['total_predictions']}")
             logger.info(f"📁 Results saved to: models/*/inference_results/")
             logger.info(f"📋 Master report: models/batch_inference_results/")
+            
+            # Sync outputs to S3
+            try:
+                s3_manager.sync_inference_results_to_s3("models")
+            except Exception as out_sync_err:
+                logger.warning(f"⚠️  Failed to sync batch inference results to S3: {out_sync_err}")
             
             return self.results, master_report
             

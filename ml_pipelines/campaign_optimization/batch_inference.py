@@ -14,6 +14,7 @@ from datetime import datetime
 from sklearn.preprocessing import StandardScaler
 import plotly.express as px
 import plotly.graph_objects as go
+from utils.s3_utils import get_s3_manager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -353,6 +354,12 @@ class CampaignOptimizationBatchInference:
         logger.info("🚀 Starting Campaign Optimization Batch Inference...")
         
         try:
+            # Ensure latest models are available locally from S3 (no sync, pull latest files)
+            try:
+                s3_manager = get_s3_manager()
+                s3_manager.download_latest_by_suffix("models/campaign_optimization", "models/campaign_optimization", [".pkl"])
+            except Exception as sync_err:
+                logger.warning(f"⚠️  Failed to load latest models from S3, proceeding with local models if present: {sync_err}")
             # Load models
             self.load_trained_models()
             
@@ -398,6 +405,19 @@ class CampaignOptimizationBatchInference:
             logger.info("=" * 60)
             logger.info(f"📊 Processed {len(df)} customers")
             logger.info(f"🎯 Ran inference for {len(all_results)} models")
+            
+            # Upload results produced in this run to S3 directly
+            try:
+                # Upload parquet and yaml plus HTMLs generated in output_dir
+                # Since save_campaign_results and create_campaign_visualizations already write files locally,
+                # upload the newest files from the output directory
+                output_dir = os.path.join(self.config['ml']['model_storage_path'], 'campaign_optimization', 'inference_results')
+                for f in os.listdir(output_dir):
+                    full = os.path.join(output_dir, f)
+                    if os.path.isfile(full) and any(f.endswith(ext) for ext in ['.parquet', '.yaml', '.html']):
+                        s3_manager.upload_file(full, "models/campaign_optimization/inference_results")
+            except Exception as out_sync_err:
+                logger.warning(f"⚠️  Failed to upload campaign inference results to S3: {out_sync_err}")
             
             return all_results
             

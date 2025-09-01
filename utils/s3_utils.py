@@ -170,6 +170,53 @@ class S3Manager:
             logger.error(f"Error listing S3 files: {e}")
         
         return files
+
+    def list_files_with_meta(self, s3_prefix: str) -> List[Dict[str, str]]:
+        """List files with metadata (Key, LastModified, Size) in S3 prefix"""
+        objects: List[Dict[str, str]] = []
+        try:
+            paginator = self.s3_client.get_paginator('list_objects_v2')
+            pages = paginator.paginate(Bucket=self.bucket, Prefix=s3_prefix)
+            for page in pages:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        objects.append({
+                            'Key': obj['Key'],
+                            'LastModified': obj.get('LastModified'),
+                            'Size': obj.get('Size')
+                        })
+        except (ClientError, NoCredentialsError) as e:
+            logger.error(f"Error listing S3 objects: {e}")
+        return objects
+
+    def download_latest_by_suffix(self, s3_subdir: str, local_dir: str, suffixes: List[str]) -> Dict[str, Optional[str]]:
+        """Download the latest file for each suffix under a subdir. Returns mapping suffix->local_path."""
+        results: Dict[str, Optional[str]] = {suffix: None for suffix in suffixes}
+        prefix = f"{self.base_path}/{s3_subdir}".rstrip('/') + '/'
+        objects = self.list_files_with_meta(prefix)
+        if not objects:
+            logger.warning(f"No objects found under {prefix}")
+            return results
+        local_path_obj = Path(local_dir)
+        local_path_obj.mkdir(parents=True, exist_ok=True)
+
+        for suffix in suffixes:
+            # Filter by suffix and choose latest by LastModified
+            candidates = [o for o in objects if o['Key'].lower().endswith(suffix.lower())]
+            if not candidates:
+                continue
+            latest = max(candidates, key=lambda o: o.get('LastModified'))
+            key = latest['Key']
+            relative = key.replace(f"{self.base_path}/", "")
+            local_file = local_path_obj / relative
+            local_file.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                logger.info(f"Downloading latest {suffix} from {key} -> {local_file}")
+                self.s3_client.download_file(self.bucket, key, str(local_file))
+                results[suffix] = str(local_file)
+            except (ClientError, NoCredentialsError) as e:
+                logger.error(f"Error downloading latest {suffix} from {key}: {e}")
+        return results
     
     def delete_file(self, s3_key: str) -> bool:
         """Delete a file from S3"""
