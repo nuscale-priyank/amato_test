@@ -10,11 +10,18 @@ import joblib
 import logging
 import yaml
 import os
+import sys
+from pathlib import Path
 from datetime import datetime, timedelta
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, mean_absolute_error, mean_squared_error, r2_score, roc_auc_score
 import warnings
+
+# Add project root to path for imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.append(str(project_root))
+
 from utils.s3_utils import get_s3_manager
 warnings.filterwarnings('ignore')
 

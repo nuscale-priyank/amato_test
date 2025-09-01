@@ -9,7 +9,9 @@ import numpy as np
 import yaml
 import logging
 import os
+import sys
 import joblib
+from pathlib import Path
 from datetime import datetime
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.preprocessing import StandardScaler, LabelEncoder
@@ -19,6 +21,12 @@ import hdbscan
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+# Add project root to path for imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.append(str(project_root))
+
+from utils.s3_utils import get_s3_manager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
