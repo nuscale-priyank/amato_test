@@ -53,21 +53,21 @@ logs/
 *.sqlite3
 
 # Model files and results - DO NOT TRACK
-models/*.pkl
-models/*.joblib
-models/*.h5
-models/*.onnx
-models/*.pb
+models/**/*.pkl
+models/**/*.joblib
+models/**/*.h5
+models/**/*.onnx
+models/**/*.pb
 
 # Model inference results and outputs
-models/*/inference_results/
+models/**/inference_results/
 models/batch_inference_results/
-models/*/visualizations/
+models/**/visualizations/
 
 # Data files and outputs
-data_pipelines/unified_dataset/output/*.parquet
-data_pipelines/unified_dataset/output/*.yaml
-data_pipelines/unified_dataset/output/*.csv
+data_pipelines/unified_dataset/output/**/*.parquet
+data_pipelines/unified_dataset/output/**/*.yaml
+data_pipelines/unified_dataset/output/**/*.csv
 
 # Generated reports and visualizations
 *.html
