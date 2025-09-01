@@ -20,13 +20,14 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from utils.s3_utils import get_s3_manager
 from datetime import datetime
 from pathlib import Path
 
-# Add project root to path
+# Add project root to path for imports
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
+
+from utils.s3_utils import get_s3_manager
 
 # Setup logging
 logging.basicConfig(
