@@ -314,6 +314,7 @@ class CampaignOptimizationBatchInference:
         
         os.makedirs(output_dir, exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        created_files = []
         
         if model_name == 'campaign_success':
             # Success probability distribution
@@ -323,7 +324,9 @@ class CampaignOptimizationBatchInference:
                 title='Campaign Success Probability Distribution',
                 nbins=30
             )
-            fig1.write_html(os.path.join(output_dir, f'{model_name}_success_distribution_{timestamp}.html'))
+            file1 = os.path.join(output_dir, f'{model_name}_success_distribution_{timestamp}.html')
+            fig1.write_html(file1)
+            created_files.append(file1)
             
             # Success category distribution
             fig2 = px.pie(
@@ -331,7 +334,9 @@ class CampaignOptimizationBatchInference:
                 names=results['success_category'].value_counts().index,
                 title='Campaign Success Category Distribution'
             )
-            fig2.write_html(os.path.join(output_dir, f'{model_name}_success_categories_{timestamp}.html'))
+            file2 = os.path.join(output_dir, f'{model_name}_success_categories_{timestamp}.html')
+            fig2.write_html(file2)
+            created_files.append(file2)
             
         else:
             # Budget distribution
@@ -341,7 +346,9 @@ class CampaignOptimizationBatchInference:
                 title='Predicted Optimal Budget Distribution',
                 nbins=30
             )
-            fig1.write_html(os.path.join(output_dir, f'{model_name}_budget_distribution_{timestamp}.html'))
+            file1 = os.path.join(output_dir, f'{model_name}_budget_distribution_{timestamp}.html')
+            fig1.write_html(file1)
+            created_files.append(file1)
             
             # Budget vs ROI scatter
             fig2 = px.scatter(
@@ -352,9 +359,12 @@ class CampaignOptimizationBatchInference:
                 title='Budget vs Estimated ROI',
                 labels={'predicted_optimal_budget': 'Predicted Budget', 'estimated_roi': 'Estimated ROI'}
             )
-            fig2.write_html(os.path.join(output_dir, f'{model_name}_budget_vs_roi_{timestamp}.html'))
+            file2 = os.path.join(output_dir, f'{model_name}_budget_vs_roi_{timestamp}.html')
+            fig2.write_html(file2)
+            created_files.append(file2)
         
         logger.info(f"✅ Visualizations saved to {output_dir}")
+        return created_files
     
     def run_batch_inference(self, data_path=None, models=None):
         """Run batch inference for campaign optimization models"""
@@ -397,12 +407,13 @@ class CampaignOptimizationBatchInference:
                 results_file, report_file = self.save_campaign_results(results, model_name)
                 
                 # Create visualizations
-                self.create_campaign_visualizations(results, model_name)
+                viz_files = self.create_campaign_visualizations(results, model_name)
                 
                 all_results[model_name] = {
                     'results': results,
                     'results_file': results_file,
-                    'report_file': report_file
+                    'report_file': report_file,
+                    'viz_files': viz_files
                 }
                 
                 logger.info(f"✅ {model_name} batch inference completed")
@@ -413,16 +424,19 @@ class CampaignOptimizationBatchInference:
             logger.info(f"📊 Processed {len(df)} customers")
             logger.info(f"🎯 Ran inference for {len(all_results)} models")
             
-            # Upload results produced in this run to S3 directly
+            # Upload only the files created in this run to S3
             try:
-                # Upload parquet and yaml plus HTMLs generated in output_dir
-                # Since save_campaign_results and create_campaign_visualizations already write files locally,
-                # upload the newest files from the output directory
-                output_dir = os.path.join(self.config['ml']['model_storage_path'], 'campaign_optimization', 'inference_results')
-                for f in os.listdir(output_dir):
-                    full = os.path.join(output_dir, f)
-                    if os.path.isfile(full) and any(f.endswith(ext) for ext in ['.parquet', '.yaml', '.html']):
-                        s3_manager.upload_file(full, "models/campaign_optimization/inference_results")
+                s3_manager = get_s3_manager()
+                for model_name, model_results in all_results.items():
+                    # Upload the specific files created for this model
+                    if 'results_file' in model_results and os.path.exists(model_results['results_file']):
+                        s3_manager.upload_file(model_results['results_file'], "models/campaign_optimization/inference_results")
+                    if 'report_file' in model_results and os.path.exists(model_results['report_file']):
+                        s3_manager.upload_file(model_results['report_file'], "models/campaign_optimization/inference_results")
+                    if 'viz_files' in model_results:
+                        for viz_file in model_results['viz_files']:
+                            if os.path.exists(viz_file):
+                                s3_manager.upload_file(viz_file, "models/campaign_optimization/inference_results")
             except Exception as out_sync_err:
                 logger.warning(f"⚠️  Failed to upload campaign inference results to S3: {out_sync_err}")
             
