@@ -1,0 +1,35 @@
+# S3 Configuration for AMATO Project
+s3:
+  bucket: nuscale-data-services-public
+  base_path: amato_pm
+  
+  # Data pipeline paths
+  data_pipelines:
+    unified_dataset_output: data_pipelines/unified_dataset/output/
+  
+  # Model storage paths
+  models:
+    base_path: models/
+    campaign_optimization: models/campaign_optimization/
+    customer_segmentation: models/customer_segmentation/
+    forecasting: models/forecasting/
+    journey_simulation: models/journey_simulation/
+    batch_inference_results: models/batch_inference_results/
+  
+  # Inference results paths
+  inference_results:
+    campaign_optimization: models/campaign_optimization/inference_results/
+    customer_segmentation: models/customer_segmentation/inference_results/
+    forecasting: models/forecasting/inference_results/
+    journey_simulation: models/journey_simulation/inference_results/
+  
+  # Visualization paths
+  visualizations:
+    customer_segmentation: models/customer_segmentation/visualizations/
+
+# File types to sync
+file_types:
+  models: ['.pkl', '.joblib', '.h5', '.onnx', '.pb']
+  data: ['.parquet', '.csv', '.yaml', '.json']
+  visualizations: ['.html', '.png', '.jpg', '.svg']
+  reports: ['.yaml', '.json', '.html']
