@@ -396,6 +396,14 @@ class UnifiedDatasetCreator:
         output_file = os.path.join(output_path, 'unified_customer_dataset.parquet')
         df.to_parquet(output_file, index=False)
         
+        # Upload parquet directly to S3
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.upload_file(output_file, "data_pipelines/unified_dataset/output")
+            logger.info("✅ Unified dataset uploaded to S3")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload unified dataset to S3: {e}")
+        
         # Save feature summary
         feature_summary = {
             'total_customers': len(df),
@@ -409,6 +417,13 @@ class UnifiedDatasetCreator:
         summary_file = os.path.join(output_path, 'unified_dataset_summary.yaml')
         with open(summary_file, 'w') as f:
             yaml.dump(feature_summary, f, default_flow_style=False)
+        
+        # Upload summary directly to S3
+        try:
+            s3_manager.upload_file(summary_file, "data_pipelines/unified_dataset/output")
+            logger.info("✅ Dataset summary uploaded to S3")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload dataset summary to S3: {e}")
         
         logger.info(f"✅ Unified dataset saved to {output_file}")
         logger.info(f"✅ Feature summary saved to {summary_file}")
@@ -448,6 +463,14 @@ class UnifiedDatasetCreator:
         with open(report_file, 'w') as f:
             yaml.dump(report, f, default_flow_style=False)
         
+        # Upload report directly to S3
+        try:
+            s3_manager = get_s3_manager()
+            s3_manager.upload_file(report_file, "data_pipelines/unified_dataset/output")
+            logger.info("✅ Dataset report uploaded to S3")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to upload dataset report to S3: {e}")
+        
         logger.info(f"✅ Dataset report saved to {report_file}")
         return report
     
@@ -467,13 +490,6 @@ class UnifiedDatasetCreator:
             
             # Generate report
             report = self.generate_dataset_report(df_unified)
-            
-            # Sync outputs to S3
-            try:
-                s3_manager = get_s3_manager()
-                s3_manager.sync_data_to_s3("data_pipelines/unified_dataset/output")
-            except Exception as sync_err:
-                logger.warning(f"⚠️  Failed to sync unified dataset outputs to S3: {sync_err}")
             
             logger.info("=" * 60)
             logger.info("🎉 UNIFIED DATASET CREATION COMPLETED!")
