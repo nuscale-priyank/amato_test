@@ -368,6 +368,7 @@ class JourneySimulationBatchInference:
         
         os.makedirs(output_dir, exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        created_files = []
         
         if model_name == 'journey_stage':
             # Journey stage distribution
@@ -378,6 +379,7 @@ class JourneySimulationBatchInference:
             )
             html1 = os.path.join(output_dir, f'{model_name}_stage_distribution_{timestamp}.html')
             fig1.write_html(html1)
+            created_files.append(html1)
             
             # Stage confidence distribution
             fig2 = px.histogram(
@@ -388,6 +390,7 @@ class JourneySimulationBatchInference:
             )
             html2 = os.path.join(output_dir, f'{model_name}_confidence_distribution_{timestamp}.html')
             fig2.write_html(html2)
+            created_files.append(html2)
             
         else:
             # Conversion probability distribution
@@ -399,6 +402,7 @@ class JourneySimulationBatchInference:
             )
             html3 = os.path.join(output_dir, f'{model_name}_conversion_distribution_{timestamp}.html')
             fig1.write_html(html3)
+            created_files.append(html3)
             
             # Conversion category distribution
             fig2 = px.pie(
@@ -408,15 +412,10 @@ class JourneySimulationBatchInference:
             )
             html4 = os.path.join(output_dir, f'{model_name}_conversion_categories_{timestamp}.html')
             fig2.write_html(html4)
-        # Upload visualizations to S3
-        try:
-            s3_manager = get_s3_manager()
-            for f in [html1, html2, html3, html4]:
-                s3_manager.upload_file(f, "models/journey_simulation/inference_results")
-        except Exception as e:
-            logger.warning(f"⚠️  Failed to upload journey visualizations to S3: {e}")
+            created_files.append(html4)
         
         logger.info(f"✅ Visualizations saved to {output_dir}")
+        return created_files
     
     def run_batch_inference(self, data_path=None, models=None):
         """Run complete batch inference pipeline."""
@@ -444,8 +443,13 @@ class JourneySimulationBatchInference:
             if df_features is not None:
                 results = self.perform_journey_stage_prediction(df_features)
                 results_file, report_file = self.save_journey_results(results, 'journey_stage')
-                self.create_journey_visualizations(results, 'journey_stage')
-                all_results['journey_stage'] = results
+                viz_files = self.create_journey_visualizations(results, 'journey_stage')
+                all_results['journey_stage'] = {
+                    'results': results,
+                    'results_file': results_file,
+                    'report_file': report_file,
+                    'viz_files': viz_files
+                }
                 logger.info("✅ journey_stage batch inference completed")
             
             # Conversion Prediction
@@ -454,8 +458,13 @@ class JourneySimulationBatchInference:
             if df_features is not None:
                 results = self.perform_conversion_prediction(df_features)
                 results_file, report_file = self.save_journey_results(results, 'conversion_prediction')
-                self.create_journey_visualizations(results, 'conversion_prediction')
-                all_results['conversion_prediction'] = results
+                viz_files = self.create_journey_visualizations(results, 'conversion_prediction')
+                all_results['conversion_prediction'] = {
+                    'results': results,
+                    'results_file': results_file,
+                    'report_file': report_file,
+                    'viz_files': viz_files
+                }
                 logger.info("✅ conversion_prediction batch inference completed")
             
             logger.info("=" * 60)
@@ -463,6 +472,22 @@ class JourneySimulationBatchInference:
             logger.info("=" * 60)
             logger.info(f"📊 Processed {len(df)} customers")
             logger.info(f"🎯 Ran inference for {len(all_results)} models")
+            
+            # Upload only the files created in this run to S3
+            try:
+                s3_manager = get_s3_manager()
+                for model_name, model_results in all_results.items():
+                    # Upload the specific files created for this model
+                    if 'results_file' in model_results and os.path.exists(model_results['results_file']):
+                        s3_manager.upload_file(model_results['results_file'], "models/journey_simulation/inference_results")
+                    if 'report_file' in model_results and os.path.exists(model_results['report_file']):
+                        s3_manager.upload_file(model_results['report_file'], "models/journey_simulation/inference_results")
+                    if 'viz_files' in model_results:
+                        for viz_file in model_results['viz_files']:
+                            if os.path.exists(viz_file):
+                                s3_manager.upload_file(viz_file, "models/journey_simulation/inference_results")
+            except Exception as out_sync_err:
+                logger.warning(f"⚠️  Failed to upload journey inference results to S3: {out_sync_err}")
             
             return all_results
             
