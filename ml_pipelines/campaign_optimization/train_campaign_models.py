@@ -1,339 +1,405 @@
 #!/usr/bin/env python3
 """
-Campaign Optimization Pipeline Training Script
-Trains campaign performance and A/B test optimization models
+AMATO Production - Campaign Optimization ML Pipeline
+
+This script trains models for campaign success prediction and budget optimization 
+using customer behavioral data.
+
+Author: Data Science Team
+Date: 2024
 """
 
+# Import required libraries
 import pandas as pd
 import numpy as np
-import joblib
-import logging
 import yaml
+import logging
 import os
 import sys
+import joblib
 from pathlib import Path
-from datetime import datetime, timedelta
-from sklearn.model_selection import train_test_split
+from datetime import datetime
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, mean_absolute_error, mean_squared_error, r2_score, roc_auc_score
-import warnings
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.model_selection import train_test_split, cross_val_score
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # Add project root to path for imports
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
 from utils.s3_utils import get_s3_manager
-warnings.filterwarnings('ignore')
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class CampaignOptimizationPipeline:
     def __init__(self, config_path='config/database_config.yaml'):
         self.config = self.load_config(config_path)
-        self.models_path = 'models/campaign_optimization'
-        os.makedirs(self.models_path, exist_ok=True)
+        self.models = {}
+        self.scalers = {}
+        self.metadata = {}
         
     def load_config(self, config_path):
-        with open(config_path, 'r') as file:
-            return yaml.safe_load(file)
-    
-    def load_unified_data(self):
-        """Load unified dataset for campaign optimization"""
+        """Load configuration file"""
         try:
-            # Load from parquet file
+            with open(config_path, 'r') as f:
+                return yaml.safe_load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load config: {e}")
+            return {}
+    
+    def load_data(self):
+        """Load historical training data for campaign optimization (before 3 months ago)"""
+        try:
+            # Load historical training data from S3
+            logger.info("🔍 Loading historical training data from S3...")
+            s3_manager = get_s3_manager()
+            s3_manager.load_training_data_from_s3()
+            logger.info("✅ Historical training data loaded from S3")
+            
+            # Load the training dataset (historical data)
             data_path = 'data_pipelines/unified_dataset/output/unified_customer_dataset.parquet'
+            
             if os.path.exists(data_path):
                 df = pd.read_parquet(data_path)
-                logger.info(f"Loaded unified dataset: {df.shape}")
+                logger.info(f"✅ Loaded historical training dataset: {df.shape}")
+                logger.info(f"📅 This dataset contains historical data for model training")
                 return df
             else:
-                logger.error(f"Unified dataset not found: {data_path}")
+                logger.error(f"❌ Historical training dataset not found at {data_path}")
                 return None
         except Exception as e:
-            logger.error(f"Error loading unified data: {e}")
+            logger.error(f"❌ Failed to load historical training data: {e}")
             return None
     
-    def prepare_campaign_features(self, df):
-        """Prepare features for campaign optimization models"""
-        logger.info("Preparing campaign optimization features...")
+    def prepare_features(self, df, target_col):
+        """Prepare features for campaign optimization"""
+        logger.info(f"🔧 Preparing features for {target_col}...")
         
-        # Create campaign performance features
-        df['campaign_roas'] = df['avg_roas']  # Use existing ROAS data
-        df['campaign_cpa'] = df['total_campaign_revenue'] / df['campaign_count'].replace(0, 1)  # Simplified CPA
-        df['campaign_ctr'] = df['avg_ctr']  # Use existing CTR data
-        df['campaign_cvr'] = df['campaign_response_rate']  # Use response rate as conversion rate
+        # Select features based on target - use columns that actually exist
+        if target_col == 'campaign_success':
+            feature_columns = [
+                'recency_days', 'frequency', 'monetary_value',
+                'avg_order_value', 'customer_lifetime_value',
+                'campaign_count', 'avg_roas', 'avg_ctr', 'total_campaign_revenue',
+                'campaign_response_rate', 'avg_ctr_lift', 'rfm_score',
+                'total_sessions', 'total_events',
+                'conversion_probability', 'churn_risk', 'upsell_potential'
+            ]
+        elif target_col == 'budget_optimization':
+            feature_columns = [
+                'recency_days', 'frequency', 'monetary_value',
+                'avg_order_value', 'customer_lifetime_value',
+                'campaign_count', 'avg_roas', 'total_campaign_revenue',
+                'rfm_score', 'conversion_probability'
+            ]
+        else:
+            logger.error(f"❌ Unknown target column: {target_col}")
+            return None, None, None
         
-        # Create campaign success indicators
-        df['campaign_success'] = df.apply(self.calculate_campaign_success, axis=1)
-        df['ab_test_winner'] = df.apply(self.calculate_ab_test_winner, axis=1)
+        # Filter available features
+        available_features = [col for col in feature_columns if col in df.columns]
         
-        # Create customer-campaign interaction features
-        df['customer_campaign_affinity'] = df.apply(self.calculate_customer_campaign_affinity, axis=1)
-        df['optimal_campaign_budget'] = df.apply(self.calculate_optimal_budget, axis=1)
+        if len(available_features) < 5:
+            logger.warning(f"⚠️  Only {len(available_features)} features available for {target_col}")
+            
+        # Create feature matrix
+        X = df[available_features].copy()
         
-        # Create seasonal features
-        df['campaign_month'] = pd.to_datetime(df['registration_date']).dt.month
-        df['campaign_quarter'] = pd.to_datetime(df['registration_date']).dt.quarter
-        df['campaign_day_of_week'] = pd.to_datetime(df['registration_date']).dt.dayofweek
+        # Create synthetic target variables based on available data
+        if target_col == 'campaign_success':
+            # Create campaign success based on ROAS and CTR
+            y = df.apply(lambda row: 
+                'high' if row['avg_roas'] > 3.0 and row['avg_ctr'] > 0.05 else
+                'medium' if row['avg_roas'] > 2.0 and row['avg_ctr'] > 0.03 else 'low', axis=1)
+        elif target_col == 'budget_optimization':
+            # Create budget optimization target based on campaign performance
+            y = df.apply(lambda row: 
+                min(1000, max(100, row['total_campaign_revenue'] * (row['avg_roas'] / 2.0))), axis=1)
+        else:
+            y = None
         
-        # Create targeting features
-        df['target_audience_match'] = df.apply(self.calculate_target_audience_match, axis=1)
-        df['channel_effectiveness'] = df.apply(self.calculate_channel_effectiveness, axis=1)
+        # Handle missing values
+        X = X.fillna(X.median())
+        if y is not None:
+            if y.dtype == 'object':  # Categorical target
+                y = y.fillna(y.mode()[0] if len(y.mode()) > 0 else 'medium')
+            else:  # Numeric target
+                y = y.fillna(y.median())
         
-        # Fill NaN values
-        df = df.fillna(0)
+        # Remove outliers using IQR method
+        for col in X.columns:
+            Q1 = X[col].quantile(0.25)
+            Q3 = X[col].quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 1.5 * IQR
+            upper_bound = Q3 + 1.5 * IQR
+            X[col] = X[col].clip(lower_bound, upper_bound)
         
-        return df
+        logger.info(f"✅ Prepared {len(X)} customers with {len(X.columns)} features for {target_col}")
+        logger.info(f"   Target distribution: {y.value_counts().to_dict() if hasattr(y, 'value_counts') else 'Continuous'}")
+        return X, y, available_features
     
-    def calculate_campaign_success(self, row):
-        """Calculate campaign success based on multiple metrics"""
-        success_score = 0
-        
-        # ROAS threshold
-        if row['campaign_roas'] > 3.0:
-            success_score += 3
-        elif row['campaign_roas'] > 2.0:
-            success_score += 2
-        elif row['campaign_roas'] > 1.5:
-            success_score += 1
-        
-        # CTR threshold
-        if row['campaign_ctr'] > 0.05:
-            success_score += 2
-        elif row['campaign_ctr'] > 0.03:
-            success_score += 1
-        
-        # Conversion rate threshold
-        if row['campaign_cvr'] > 0.03:
-            success_score += 2
-        elif row['campaign_cvr'] > 0.02:
-            success_score += 1
-        
-        # Budget efficiency
-        if row['campaign_count'] < 5 and row['total_campaign_revenue'] > 2000:
-            success_score += 1
-        
-        return 'high' if success_score >= 6 else 'medium' if success_score >= 3 else 'low'
-    
-    def calculate_ab_test_winner(self, row):
-        """Calculate A/B test winner based on performance"""
-        # Simplified A/B test winner calculation
-        return 'A' if row['campaign_ctr'] > 0.04 and row['campaign_cvr'] > 0.02 else 'B'
-    
-    def calculate_customer_campaign_affinity(self, row):
-        """Calculate customer-campaign affinity score"""
-        affinity = 0.5  # Base affinity
-        
-        # RFM score influence
-        if row['rfm_score'] > 80:
-            affinity += 0.2
-        elif row['rfm_score'] > 60:
-            affinity += 0.1
-        
-        # Campaign type match
-        if row['campaign_type'] in ['Email', 'Social Media'] and row['total_sessions'] > 10:
-            affinity += 0.1
-        
-        # Channel preference (simplified)
-        if row['total_events'] > 5:
-            affinity += 0.1
-        
-        return min(affinity, 1.0)
-    
-    def calculate_optimal_budget(self, row):
-        """Calculate optimal campaign budget based on customer value"""
-        base_budget = 100
-        
-        # Customer value influence
-        if row['total_campaign_revenue'] > 1000:
-            base_budget += 200
-        elif row['total_campaign_revenue'] > 500:
-            base_budget += 100
-        
-        # RFM score influence
-        if row['rfm_score'] > 80:
-            base_budget *= 1.5
-        elif row['rfm_score'] > 60:
-            base_budget *= 1.2
-        
-        # Campaign type influence
-        if row['campaign_type'] == 'Email':
-            base_budget *= 0.8
-        elif row['campaign_type'] == 'Video':
-            base_budget *= 1.3
-        
-        return min(base_budget, 1000)
-    
-    def calculate_target_audience_match(self, row):
-        """Calculate target audience match score"""
-        match_score = 0.5
-        
-        # Age group match
-        if row['target_audience'] == 'New Customers' and row['customer_age_days'] < 30:
-            match_score += 0.2
-        elif row['target_audience'] == 'Loyal' and row['total_transactions'] > 5:
-            match_score += 0.2
-        
-        # High value customer match
-        if row['target_audience'] == 'High Value' and row['total_campaign_revenue'] > 500:
-            match_score += 0.2
-        
-        return min(match_score, 1.0)
-    
-    def calculate_channel_effectiveness(self, row):
-        """Calculate channel effectiveness score"""
-        effectiveness = 0.5
-        
-        # Simplified channel effectiveness based on performance metrics
-        if row['campaign_ctr'] > 0.03:
-            effectiveness += 0.2
-        if row['campaign_cvr'] > 0.02:
-            effectiveness += 0.2
-        if row['campaign_roas'] > 2.0:
-            effectiveness += 0.1
-        
-        return min(effectiveness, 1.0)
-    
-    def train_campaign_success_model(self, df):
+    def train_campaign_success_model(self, X, y, n_estimators=100, max_depth=10):
         """Train campaign success prediction model"""
-        logger.info("Training campaign success prediction model...")
-        
-        # Prepare features for campaign success prediction
-        success_features = [
-            'rfm_score', 'frequency', 'avg_order_value', 'days_since_last_purchase',
-            'campaign_count', 'total_campaign_revenue', 'avg_roas', 'avg_ctr',
-            'campaign_roas', 'campaign_cpa', 'campaign_ctr', 'campaign_cvr',
-            'customer_campaign_affinity', 'target_audience_match', 'channel_effectiveness',
-            'campaign_month', 'campaign_quarter', 'campaign_day_of_week'
-        ]
-        
-        # Filter out rows with missing target
-        success_df = df[success_features + ['campaign_success']].dropna()
-        
-        if len(success_df) < 100:
-            logger.warning("Insufficient data for campaign success model")
-            return None
-        
-        X = success_df.drop('campaign_success', axis=1)
-        y = success_df['campaign_success']
+        logger.info(f"🎯 Training campaign success prediction model...")
         
         # Split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
+        # Scale features
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        
+        # Train Random Forest classifier
+        model = RandomForestClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            random_state=42,
+            n_jobs=-1
         )
+        model.fit(X_train_scaled, y_train)
         
-        # Train model
-        model = RandomForestClassifier(n_estimators=100, random_state=42)
-        model.fit(X_train, y_train)
+        # Make predictions
+        y_pred = model.predict(X_test_scaled)
         
-        # Evaluate model
-        y_pred = model.predict(X_test)
+        # Calculate metrics
         accuracy = accuracy_score(y_test, y_pred)
         precision = precision_score(y_test, y_pred, average='weighted')
         recall = recall_score(y_test, y_pred, average='weighted')
         f1 = f1_score(y_test, y_pred, average='weighted')
         
-        logger.info(f"Campaign Success Model Performance:")
-        logger.info(f"  Accuracy: {accuracy:.4f}")
-        logger.info(f"  Precision: {precision:.4f}")
-        logger.info(f"  Recall: {recall:.4f}")
-        logger.info(f"  F1-Score: {f1:.4f}")
+        # Cross-validation score
+        cv_scores = cross_val_score(model, X_train_scaled, y_train, cv=5, scoring='accuracy')
         
-        # Save model
-        model_path = os.path.join(self.models_path, 'campaign_success_model.pkl')
-        joblib.dump(model, model_path)
-        logger.info(f"✅ Campaign success model saved to {model_path}")
-        # Upload to S3
-        try:
-            s3_manager = get_s3_manager()
-            s3_manager.upload_file(model_path, "models/campaign_optimization")
-        except Exception as e:
-            logger.warning(f"⚠️  Failed to upload campaign success model to S3: {e}")
+        logger.info(f"✅ Campaign success training completed")
+        logger.info(f"   Accuracy: {accuracy:.4f}")
+        logger.info(f"   Precision: {precision:.4f}")
+        logger.info(f"   Recall: {recall:.4f}")
+        logger.info(f"   F1: {f1:.4f}")
+        logger.info(f"   CV Accuracy: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
         
-        return model
+        return model, scaler, {
+            'accuracy': accuracy,
+            'precision': precision,
+            'recall': recall,
+            'f1': f1,
+            'cv_accuracy_mean': cv_scores.mean(),
+            'cv_accuracy_std': cv_scores.std(),
+            'n_estimators': n_estimators,
+            'max_depth': max_depth
+        }
     
-    def train_budget_optimization_model(self, df):
+    def train_budget_optimization_model(self, X, y, n_estimators=100, max_depth=10):
         """Train budget optimization model"""
-        logger.info("Training budget optimization model...")
-        
-        # Prepare features for budget optimization
-        budget_features = [
-            'rfm_score', 'frequency', 'avg_order_value', 'days_since_last_purchase',
-            'campaign_count', 'total_campaign_revenue', 'avg_roas', 'avg_ctr',
-            'campaign_roas', 'campaign_cpa', 'campaign_ctr', 'campaign_cvr',
-            'customer_campaign_affinity', 'target_audience_match', 'channel_effectiveness',
-            'campaign_month', 'campaign_quarter', 'campaign_day_of_week'
-        ]
-        
-        # Filter out rows with missing target
-        budget_df = df[budget_features + ['optimal_campaign_budget']].dropna()
-        
-        if len(budget_df) < 100:
-            logger.warning("Insufficient data for budget optimization model")
-            return None
-        
-        X = budget_df.drop('optimal_campaign_budget', axis=1)
-        y = budget_df['optimal_campaign_budget']
+        logger.info(f"🎯 Training budget optimization model...")
         
         # Split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
+        # Scale features
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        
+        # Train Random Forest regressor
+        model = RandomForestRegressor(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            random_state=42,
+            n_jobs=-1
         )
+        model.fit(X_train_scaled, y_train)
         
-        # Train model
-        model = RandomForestRegressor(n_estimators=100, random_state=42)
-        model.fit(X_train, y_train)
+        # Make predictions
+        y_pred = model.predict(X_test_scaled)
         
-        # Evaluate model
-        y_pred = model.predict(X_test)
-        mae = mean_absolute_error(y_test, y_pred)
+        # Calculate metrics
         mse = mean_squared_error(y_test, y_pred)
+        mae = mean_absolute_error(y_test, y_pred)
         r2 = r2_score(y_test, y_pred)
         
-        logger.info(f"Budget Optimization Model Performance:")
-        logger.info(f"  MAE: ${mae:.2f}")
-        logger.info(f"  RMSE: ${np.sqrt(mse):.2f}")
-        logger.info(f"  R²: {r2:.4f}")
+        # Cross-validation score
+        cv_scores = cross_val_score(model, X_train_scaled, y_train, cv=5, scoring='r2')
         
-        # Save model
-        model_path = os.path.join(self.models_path, 'budget_optimization_model.pkl')
-        joblib.dump(model, model_path)
-        logger.info(f"✅ Budget optimization model saved to {model_path}")
-        # Upload to S3
+        logger.info(f"✅ Budget optimization training completed")
+        logger.info(f"   MSE: {mse:.6f}")
+        logger.info(f"   MAE: {mae:.6f}")
+        logger.info(f"   R²: {r2:.4f}")
+        logger.info(f"   CV R²: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+        
+        return model, scaler, {
+            'mse': mse,
+            'mae': mae,
+            'r2': r2,
+            'cv_r2_mean': cv_scores.mean(),
+            'cv_r2_std': cv_scores.std(),
+            'n_estimators': n_estimators,
+            'max_depth': max_depth
+        }
+    
+    def save_models(self, success_model, success_scaler, budget_model, budget_scaler, 
+                    success_metrics, budget_metrics, feature_names):
+        """Save trained models and metadata"""
+        logger.info("💾 Saving trained models...")
+        
+        # Create output directory
+        output_dir = 'models/campaign_optimization'
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Save campaign success model
+        success_path = os.path.join(output_dir, 'campaign_success_model.pkl')
+        joblib.dump(success_model, success_path)
+        
+        # Save campaign success scaler
+        success_scaler_path = os.path.join(output_dir, 'campaign_success_scaler.pkl')
+        joblib.dump(success_scaler, success_scaler_path)
+        
+        # Save budget optimization model
+        budget_path = os.path.join(output_dir, 'budget_optimization_model.pkl')
+        joblib.dump(budget_model, budget_path)
+        
+        # Save budget optimization scaler
+        budget_scaler_path = os.path.join(output_dir, 'budget_optimization_scaler.pkl')
+        joblib.dump(budget_scaler, budget_scaler_path)
+        
+        # Save metadata
+        metadata = {
+            'campaign_success': success_metrics,
+            'budget_optimization': budget_metrics,
+            'feature_names': feature_names,
+            'training_date': datetime.now().isoformat(),
+            'model_versions': {
+                'campaign_success': '1.0',
+                'budget_optimization': '1.0'
+            }
+        }
+        
+        metadata_path = os.path.join(output_dir, 'pipeline_report.yaml')
+        with open(metadata_path, 'w') as f:
+            yaml.dump(metadata, f, default_flow_style=False)
+        
+        # Upload to S3 directly (no local storage)
         try:
             s3_manager = get_s3_manager()
-            s3_manager.upload_file(model_path, "models/campaign_optimization")
+            
+            # Upload models directly to S3
+            success_uploaded = s3_manager.upload_model_direct(
+                success_model, 'campaign_success_model', 'campaign_optimization', metadata
+            )
+            budget_uploaded = s3_manager.upload_model_direct(
+                budget_model, 'budget_optimization_model', 'campaign_optimization', metadata
+            )
+            
+            # Upload scalers directly to S3
+            import io
+            buffer = io.BytesIO()
+            joblib.dump(success_scaler, buffer)
+            success_scaler_bytes = buffer.getvalue()
+            success_scaler_key = f"{s3_manager.base_path}/models/campaign_optimization/campaign_success_scaler_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
+            success_scaler_uploaded = s3_manager.upload_bytes_direct(success_scaler_bytes, success_scaler_key)
+            
+            buffer = io.BytesIO()
+            joblib.dump(budget_scaler, buffer)
+            budget_scaler_bytes = buffer.getvalue()
+            budget_scaler_key = f"{s3_manager.base_path}/models/campaign_optimization/budget_optimization_scaler_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
+            budget_scaler_uploaded = s3_manager.upload_bytes_direct(budget_scaler_bytes, budget_scaler_key)
+            
+            # Upload metadata directly to S3
+            metadata_bytes = yaml.dump(metadata, default_flow_style=False).encode('utf-8')
+            metadata_key = f"{s3_manager.base_path}/models/campaign_optimization/pipeline_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.yaml"
+            metadata_uploaded = s3_manager.upload_bytes_direct(metadata_bytes, metadata_key, 'text/yaml')
+            
+            # Check upload status
+            if all([success_uploaded, budget_uploaded, success_scaler_uploaded, budget_scaler_uploaded, metadata_uploaded]):
+                logger.info("✅ All models, scalers, and metadata uploaded directly to S3")
+                return "S3://models/campaign_optimization/"
+            else:
+                logger.warning("⚠️  Some uploads failed")
+                return None
+                
         except Exception as e:
-            logger.warning(f"⚠️  Failed to upload budget optimization model to S3: {e}")
-        
-        return model
+            logger.error(f"❌ Failed to save models to S3: {e}")
+            return None
     
-    def train_all_models(self):
-        """Train all campaign optimization models"""
-        logger.info("🚀 Starting Campaign Optimization Pipeline Training...")
+    def run_training_pipeline(self):
+        """Run the complete campaign optimization training pipeline"""
+        logger.info("🚀 Starting Campaign Optimization Training Pipeline...")
         
-        # Load data
-        df = self.load_unified_data()
-        if df is None:
-            logger.error("Failed to load unified data")
-            return False
+        try:
+            # Load data
+            df = self.load_data()
+            if df is None:
+                raise Exception("Failed to load data")
+            
+            # Prepare features for campaign success
+            X_success, y_success, success_features = self.prepare_features(df, 'campaign_success')
+            if X_success is None:
+                raise Exception("Failed to prepare campaign success features")
+            
+            # Prepare features for budget optimization
+            X_budget, y_budget, budget_features = self.prepare_features(df, 'budget_optimization')
+            if X_budget is None:
+                raise Exception("Failed to prepare budget optimization features")
+            
+            # Train campaign success model
+            success_model, success_scaler, success_metrics = self.train_campaign_success_model(X_success, y_success)
+            
+            # Train budget optimization model
+            budget_model, budget_scaler, budget_metrics = self.train_budget_optimization_model(X_budget, y_budget)
+            
+            # Save models
+            output_dir = self.save_models(
+                success_model, success_scaler, budget_model, budget_scaler,
+                success_metrics, budget_metrics, {
+                    'campaign_success': success_features,
+                    'budget_optimization': budget_features
+                }
+            )
+            
+            logger.info("=" * 60)
+            logger.info("🎉 CAMPAIGN OPTIMIZATION TRAINING COMPLETED!")
+            logger.info("=" * 60)
+            logger.info(f"📊 Trained 2 models on {len(df)} customers")
+            logger.info(f"🔧 Success features: {len(success_features)}, Budget features: {len(budget_features)}")
+            logger.info(f"💾 Models saved to: {output_dir}")
+            
+            return {
+                'campaign_success': success_model,
+                'budget_optimization': budget_model,
+                'success_metrics': success_metrics,
+                'budget_metrics': budget_metrics
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error in training pipeline: {e}")
+            raise
+
+
+def main():
+    """Main function to run the training pipeline"""
+    try:
+        # Initialize and run the pipeline
+        pipeline = CampaignOptimizationPipeline()
+        results = pipeline.run_training_pipeline()
         
-        # Prepare features
-        df = self.prepare_campaign_features(df)
+        print("\n🎉 Campaign Optimization Training completed successfully!")
+        print(f"📊 Campaign Success: Accuracy = {results['success_metrics']['accuracy']:.4f}, F1 = {results['success_metrics']['f1']:.4f}")
+        print(f"📊 Budget Optimization: R² = {results['budget_metrics']['r2']:.4f}, CV R² = {results['budget_metrics']['cv_r2_mean']:.4f}")
+        print("💾 Models saved and ready for inference!")
         
-        # Train models
-        success_model = self.train_campaign_success_model(df)
-        budget_model = self.train_budget_optimization_model(df)
-        
-        if success_model and budget_model:
-            logger.info("✅ All campaign optimization models trained successfully!")
-            return True
-        else:
-            logger.error("❌ Some campaign optimization models failed to train")
-            return False
+    except Exception as e:
+        logger.error(f"❌ Training pipeline failed: {e}")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
-    pipeline = CampaignOptimizationPipeline()
-    pipeline.train_all_models()
+    main()

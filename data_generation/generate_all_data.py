@@ -78,13 +78,20 @@ class DataGenerationOrchestrator:
             logger.error(f"❌ MongoDB data generation failed: {e}")
             return False
     
-    def generate_all_data(self):
-        """Generate data for all databases"""
+    def generate_all_data(self, databases=None):
+        """Generate data for specified databases (default: all)"""
         logger.info("🚀 Starting AMATO Production Data Generation...")
         logger.info(f"Start time: {self.start_time}")
         
         # Create logs directory
         self.create_logs_directory()
+        
+        # Determine which databases to run
+        if databases is None:
+            databases = ['mysql', 'postgresql', 'mongodb']
+            logger.info("🔄 Running all databases")
+        else:
+            logger.info(f"🔄 Running specified databases: {databases}")
         
         # Track success/failure
         results = {
@@ -94,13 +101,16 @@ class DataGenerationOrchestrator:
         }
         
         # Generate MySQL data
-        results['mysql'] = self.generate_mysql_data()
+        if 'mysql' in databases:
+            results['mysql'] = self.generate_mysql_data()
         
         # Generate PostgreSQL data
-        results['postgresql'] = self.generate_postgresql_data()
+        if 'postgresql' in databases:
+            results['postgresql'] = self.generate_postgresql_data()
         
         # Generate MongoDB data
-        results['mongodb'] = self.generate_mongodb_data()
+        if 'mongodb' in databases:
+            results['mongodb'] = self.generate_mongodb_data()
         
         # Summary
         end_time = datetime.now()
@@ -136,10 +146,32 @@ class DataGenerationOrchestrator:
         return all_success
 
 def main():
-    """Main function"""
+    """Main function with optional database selection"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Generate AMATO Production Data')
+    parser.add_argument('--databases', nargs='+', choices=['mysql', 'postgresql', 'mongodb'], 
+                       help='Specific databases to run (default: all)')
+    parser.add_argument('--retry-failed', action='store_true',
+                       help='Only run databases that failed in previous run')
+    
+    args = parser.parse_args()
+    
     try:
         orchestrator = DataGenerationOrchestrator()
-        success = orchestrator.generate_all_data()
+        
+        if args.retry_failed:
+            # Based on previous run, PostgreSQL failed
+            databases = ['postgresql']
+            print("🔄 Retry mode: Running only failed database (PostgreSQL)")
+        elif args.databases:
+            databases = args.databases
+            print(f"🔄 Running specified databases: {databases}")
+        else:
+            databases = None  # Run all
+            print("🔄 Running all databases")
+        
+        success = orchestrator.generate_all_data(databases)
         
         if success:
             print("\n🎉 Data generation completed successfully!")

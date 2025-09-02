@@ -52,6 +52,33 @@ class PostgreSQLDataGenerator:
             self.conn.close()
             logger.info("PostgreSQL connection closed")
     
+    def clear_existing_data(self):
+        """Clear existing data from all tables"""
+        logger.info("🧹 Clearing existing data from PostgreSQL tables...")
+        cursor = self.conn.cursor()
+        
+        try:
+            # Clear tables in reverse dependency order
+            tables_to_clear = [
+                'ab_test_results', 'ab_tests', 'campaign_performance', 'campaigns'
+            ]
+            
+            for table in tables_to_clear:
+                cursor.execute(f"TRUNCATE TABLE {table} RESTART IDENTITY CASCADE")
+                logger.info(f"✅ Cleared table: {table}")
+            
+            # TRUNCATE with RESTART IDENTITY automatically resets any auto-incrementing columns
+            
+            self.conn.commit()
+            logger.info("✅ All existing data cleared from PostgreSQL")
+            
+        except Exception as e:
+            logger.error(f"❌ Error clearing data: {e}")
+            self.conn.rollback()
+            raise
+        finally:
+            cursor.close()
+    
     def generate_campaigns(self, count=100):
         """Generate campaign data"""
         logger.info(f"Generating {count} campaigns...")
@@ -279,6 +306,9 @@ class PostgreSQLDataGenerator:
         
         try:
             self.connect_postgresql()
+            
+            # Clear existing data first
+            self.clear_existing_data()
             
             # Generate campaigns
             campaigns = self.generate_campaigns(self.config['data_generation']['campaigns_count'])

@@ -45,21 +45,29 @@ class CustomerSegmentationPipeline:
         with open(config_path, 'r') as file:
             return yaml.safe_load(file)
     
-    def load_unified_dataset(self):
-        """Load the unified customer dataset"""
-        logger.info("📊 Loading unified customer dataset...")
-        
-        dataset_path = os.path.join(
-            self.config['data_pipelines']['parquet_storage']['base_path'],
-            self.config['data_pipelines']['parquet_storage']['unified_customer']
-        )
-        
-        if not os.path.exists(dataset_path):
-            raise FileNotFoundError(f"Unified dataset not found at {dataset_path}")
-        
-        df = pd.read_parquet(dataset_path)
-        logger.info(f"✅ Loaded dataset with {len(df)} customers and {len(df.columns)} features")
-        return df
+    def load_data(self):
+        """Load historical training data for customer segmentation (before 3 months ago)"""
+        try:
+            # Load historical training data from S3
+            logger.info("🔍 Loading historical training data from S3...")
+            s3_manager = get_s3_manager()
+            s3_manager.load_training_data_from_s3()
+            logger.info("✅ Historical training data loaded from S3")
+            
+            # Load the training dataset (historical data)
+            data_path = 'data_pipelines/unified_dataset/output/unified_customer_dataset.parquet'
+            
+            if os.path.exists(data_path):
+                df = pd.read_parquet(data_path)
+                logger.info(f"✅ Loaded historical training dataset: {df.shape}")
+                logger.info(f"📅 This dataset contains historical data for model training")
+                return df
+            else:
+                logger.error(f"❌ Historical training dataset not found at {data_path}")
+                return None
+        except Exception as e:
+            logger.error(f"❌ Failed to load historical training data: {e}")
+            return None
     
     def prepare_features(self, df):
         """Prepare features for segmentation"""
@@ -418,6 +426,71 @@ class CustomerSegmentationPipeline:
             logger.error(f"❌ Error in segmentation pipeline: {e}")
             raise
     
+    def run_training_pipeline(self):
+        """Run the complete customer segmentation training pipeline"""
+        logger.info("🚀 Starting Customer Segmentation Training Pipeline...")
+        
+        try:
+            # Load data
+            df = self.load_data()
+            if df is None:
+                raise Exception("Failed to load data")
+            
+            # Prepare features
+            df_features = self.prepare_features(df)
+            
+            # Preprocess data
+            X_scaled, customer_ids = self.preprocess_data(df_features)
+            
+            # Train models
+            models_data = {}
+            
+            # K-means model
+            kmeans_model, kmeans_silhouette, kmeans_calinski = self.train_kmeans_model(X_scaled, n_clusters=5)
+            df_kmeans, kmeans_analysis, kmeans_summary = self.analyze_segments(df_features, kmeans_model, 'kmeans')
+            self.create_visualizations(df_kmeans, 'kmeans')
+            
+            models_data['kmeans'] = {
+                'model': kmeans_model,
+                'silhouette_score': kmeans_silhouette,
+                'calinski_score': kmeans_calinski,
+                'segment_analysis': kmeans_analysis,
+                'segment_summary': kmeans_summary
+            }
+            
+            # HDBSCAN model
+            hdbscan_model, hdbscan_silhouette, hdbscan_calinski = self.train_hdbscan_model(X_scaled)
+            df_hdbscan, hdbscan_analysis, hdbscan_summary = self.analyze_segments(df_features, hdbscan_model, 'hdbscan')
+            self.create_visualizations(df_hdbscan, 'hdbscan')
+            
+            models_data['hdbscan'] = {
+                'model': hdbscan_model,
+                'silhouette_score': hdbscan_silhouette,
+                'calinski_score': hdbscan_calinski,
+                'segment_analysis': hdbscan_analysis,
+                'segment_summary': hdbscan_summary
+            }
+            
+            # Save models
+            self.save_models(models_data)
+            
+            # Generate final report
+            self.generate_final_report(models_data)
+            
+            logger.info("=" * 60)
+            logger.info("🎉 CUSTOMER SEGMENTATION TRAINING COMPLETED!")
+            logger.info("=" * 60)
+            logger.info(f"📊 Trained {len(models_data)} models")
+            logger.info(f"🎯 K-means: {len(kmeans_summary)} segments, Silhouette: {kmeans_silhouette:.3f}")
+            logger.info(f"🎯 HDBSCAN: {len(hdbscan_summary)} segments, Silhouette: {hdbscan_silhouette:.3f}")
+            logger.info(f"💾 Models saved and ready for inference!")
+            
+            return models_data
+            
+        except Exception as e:
+            logger.error(f"❌ Error in training pipeline: {e}")
+            raise
+    
     def generate_final_report(self, models_data):
         """Generate final pipeline report"""
         logger.info("📋 Generating final report...")
@@ -466,19 +539,19 @@ class CustomerSegmentationPipeline:
         logger.info(f"✅ Final report saved to {report_file}")
 
 def main():
-    """Main function"""
+    """Main function to run the training pipeline"""
     try:
+        # Initialize and run the pipeline
         pipeline = CustomerSegmentationPipeline()
-        models_data = pipeline.run_pipeline()
+        results = pipeline.run_training_pipeline()
         
-        print(f"\n🎉 Customer Segmentation Pipeline completed successfully!")
-        print(f"📊 Trained {len(models_data)} models")
-        print(f"💾 Models saved to: models/customer_segmentation/")
-        print(f"📈 Ready for inference and deployment!")
+        print("\n🎉 Customer Segmentation Training completed successfully!")
+        print(f"📊 Trained {len(results)} models")
+        print("💾 Models saved and ready for inference!")
         
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        raise
+        logger.error(f"❌ Training pipeline failed: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

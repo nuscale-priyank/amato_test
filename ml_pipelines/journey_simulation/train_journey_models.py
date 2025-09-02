@@ -39,20 +39,28 @@ class JourneySimulationPipeline:
         with open(config_path, 'r') as file:
             return yaml.safe_load(file)
     
-    def load_unified_data(self):
-        """Load unified dataset for journey simulation"""
+    def load_data(self):
+        """Load historical training data for journey simulation (before 3 months ago)"""
         try:
-            # Load from parquet file
+            # Load historical training data from S3
+            logger.info("🔍 Loading historical training data from S3...")
+            s3_manager = get_s3_manager()
+            s3_manager.load_training_data_from_s3()
+            logger.info("✅ Historical training data loaded from S3")
+            
+            # Load the training dataset (historical data)
             data_path = 'data_pipelines/unified_dataset/output/unified_customer_dataset.parquet'
+            
             if os.path.exists(data_path):
                 df = pd.read_parquet(data_path)
-                logger.info(f"Loaded unified dataset: {df.shape}")
+                logger.info(f"✅ Loaded historical training dataset: {df.shape}")
+                logger.info(f"📅 This dataset contains historical data for model training")
                 return df
             else:
-                logger.error(f"Unified dataset not found: {data_path}")
+                logger.error(f"❌ Historical training dataset not found at {data_path}")
                 return None
         except Exception as e:
-            logger.error(f"Error loading unified data: {e}")
+            logger.error(f"❌ Failed to load historical training data: {e}")
             return None
     
     def prepare_journey_features(self, df):
@@ -243,30 +251,55 @@ class JourneySimulationPipeline:
         
         return model
     
-    def train_all_models(self):
-        """Train all journey simulation models"""
-        logger.info("🚀 Starting Journey Simulation Pipeline Training...")
+    def run_training_pipeline(self):
+        """Run the complete journey simulation training pipeline"""
+        logger.info("🚀 Starting Journey Simulation Training Pipeline...")
         
-        # Load data
-        df = self.load_unified_data()
-        if df is None:
-            logger.error("Failed to load unified data")
-            return False
+        try:
+            # Load data
+            df = self.load_data()
+            if df is None:
+                raise Exception("Failed to load data")
+            
+            # Prepare features
+            df = self.prepare_journey_features(df)
+            
+            # Train models
+            stage_model = self.train_journey_stage_model(df)
+            conversion_model = self.train_conversion_prediction_model(df)
+            
+            if stage_model and conversion_model:
+                logger.info("=" * 60)
+                logger.info("🎉 JOURNEY SIMULATION TRAINING COMPLETED!")
+                logger.info("=" * 60)
+                logger.info(f"📊 Trained 2 models on {len(df)} customers")
+                logger.info("💾 Models saved and ready for inference!")
+                
+                return {
+                    'journey_stage': stage_model,
+                    'conversion_prediction': conversion_model
+                }
+            else:
+                raise Exception("Some journey simulation models failed to train")
+                
+        except Exception as e:
+            logger.error(f"❌ Error in training pipeline: {e}")
+            raise
+
+def main():
+    """Main function to run the training pipeline"""
+    try:
+        # Initialize and run the pipeline
+        pipeline = JourneySimulationPipeline()
+        results = pipeline.run_training_pipeline()
         
-        # Prepare features
-        df = self.prepare_journey_features(df)
+        print("\n🎉 Journey Simulation Training completed successfully!")
+        print(f"📊 Trained {len(results)} models")
+        print("💾 Models saved and ready for inference!")
         
-        # Train models
-        stage_model = self.train_journey_stage_model(df)
-        conversion_model = self.train_conversion_prediction_model(df)
-        
-        if stage_model and conversion_model:
-            logger.info("✅ All journey simulation models trained successfully!")
-            return True
-        else:
-            logger.error("❌ Some journey simulation models failed to train")
-            return False
+    except Exception as e:
+        logger.error(f"❌ Training pipeline failed: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    pipeline = JourneySimulationPipeline()
-    pipeline.train_all_models()
+    main()

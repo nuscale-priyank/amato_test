@@ -48,6 +48,36 @@ class MySQLDataGenerator:
             self.conn.close()
             logger.info("MySQL connection closed")
     
+    def clear_existing_data(self):
+        """Clear existing data from all tables"""
+        logger.info("🧹 Clearing existing data from MySQL tables...")
+        cursor = self.conn.cursor()
+        
+        try:
+            # Clear tables in reverse dependency order
+            tables_to_clear = [
+                'transactions', 'customer_segments', 'customers'
+            ]
+            
+            for table in tables_to_clear:
+                cursor.execute(f"DELETE FROM {table}")
+                logger.info(f"✅ Cleared table: {table}")
+            
+            # Reset auto-increment counters
+            for table in tables_to_clear:
+                cursor.execute(f"ALTER TABLE {table} AUTO_INCREMENT = 1")
+                logger.info(f"✅ Reset auto-increment for: {table}")
+            
+            self.conn.commit()
+            logger.info("✅ All existing data cleared from MySQL")
+            
+        except Exception as e:
+            logger.error(f"❌ Error clearing data: {e}")
+            self.conn.rollback()
+            raise
+        finally:
+            cursor.close()
+    
     def generate_customers(self, count=10000):
         """Generate customer data"""
         logger.info(f"Generating {count} customers...")
@@ -261,6 +291,9 @@ class MySQLDataGenerator:
         
         try:
             self.connect_mysql()
+            
+            # Clear existing data first
+            self.clear_existing_data()
             
             # Generate customers
             customers = self.generate_customers(self.config['data_generation']['customers_count'])

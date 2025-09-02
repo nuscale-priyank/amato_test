@@ -45,6 +45,25 @@ class MongoDBDataGenerator:
             self.client.close()
             logger.info("MongoDB connection closed")
     
+    def clear_existing_data(self):
+        """Clear existing data from all collections"""
+        logger.info("🧹 Clearing existing data from MongoDB collections...")
+        
+        try:
+            # Clear all collections
+            collections = ['sessions', 'page_views', 'events', 'product_interactions', 'search_queries']
+            
+            for collection_name in collections:
+                collection = self.db[collection_name]
+                result = collection.delete_many({})
+                logger.info(f"✅ Cleared collection: {collection_name} ({result.deleted_count} documents)")
+            
+            logger.info("✅ All existing data cleared from MongoDB")
+            
+        except Exception as e:
+            logger.error(f"❌ Error clearing data: {e}")
+            raise
+    
     def generate_sessions(self, count=100000):
         """Generate session data"""
         logger.info(f"Generating {count} sessions...")
@@ -254,6 +273,9 @@ class MongoDBDataGenerator:
         
         try:
             self.connect_mongodb()
+            
+            # Clear existing data first
+            self.clear_existing_data()
             
             # Generate sessions
             sessions = self.generate_sessions(self.config['data_generation']['sessions_count'])

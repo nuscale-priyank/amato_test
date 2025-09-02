@@ -59,9 +59,16 @@ class CampaignOptimizationBatchInference:
                 self.scalers['campaign_success'] = joblib.load(success_scaler_path)
             else:
                 self.scalers['campaign_success'] = None
-            # Create simple metadata
+            # Create metadata with correct feature columns from training pipeline
             self.metadata['campaign_success'] = {
-                'feature_columns': ['rfm_score', 'frequency', 'avg_order_value', 'days_since_last_purchase', 'campaign_count', 'total_campaign_revenue', 'avg_roas', 'avg_ctr', 'campaign_roas', 'campaign_cpa', 'campaign_ctr', 'campaign_cvr', 'customer_campaign_affinity', 'target_audience_match', 'channel_effectiveness', 'campaign_month', 'campaign_quarter', 'campaign_day_of_week'],
+                'feature_columns': [
+                    'recency_days', 'frequency', 'monetary_value',
+                    'avg_order_value', 'customer_lifetime_value',
+                    'campaign_count', 'avg_roas', 'avg_ctr', 'total_campaign_revenue',
+                    'campaign_response_rate', 'avg_ctr_lift', 'rfm_score',
+                    'total_sessions', 'total_events',
+                    'conversion_probability', 'churn_risk', 'upsell_potential'
+                ],
                 'model_type': 'RandomForestClassifier',
                 'training_date': datetime.now().isoformat()
             }
@@ -78,9 +85,14 @@ class CampaignOptimizationBatchInference:
                 self.scalers['budget_optimization'] = joblib.load(budget_scaler_path)
             else:
                 self.scalers['budget_optimization'] = None
-            # Create simple metadata
+            # Create metadata with correct feature columns from training pipeline
             self.metadata['budget_optimization'] = {
-                'feature_columns': ['rfm_score', 'frequency', 'avg_order_value', 'days_since_last_purchase', 'campaign_count', 'total_campaign_revenue', 'avg_roas', 'avg_ctr', 'campaign_roas', 'campaign_cpa', 'campaign_ctr', 'campaign_cvr', 'customer_campaign_affinity', 'target_audience_match', 'channel_effectiveness', 'campaign_month', 'campaign_quarter', 'campaign_day_of_week'],
+                'feature_columns': [
+                    'recency_days', 'frequency', 'monetary_value',
+                    'avg_order_value', 'customer_lifetime_value',
+                    'campaign_count', 'avg_roas', 'total_campaign_revenue',
+                    'rfm_score', 'conversion_probability'
+                ],
                 'model_type': 'RandomForestRegressor',
                 'training_date': datetime.now().isoformat()
             }
@@ -88,26 +100,62 @@ class CampaignOptimizationBatchInference:
         
         logger.info(f"✅ Loaded {len(self.models)} campaign optimization models")
     
-    def load_inference_data(self, data_path=None):
-        """Load data for batch inference"""
-        logger.info("📊 Loading inference data...")
+    def load_inference_data(self, months_recent=3, data_path=None):
+        """Load recent inference data (last 1, 2, or 3 months)"""
+        logger.info(f"📊 Loading recent inference data (last {months_recent} months)...")
         
-        if data_path is None:
-            data_path = 'data_pipelines/unified_dataset/output/unified_customer_dataset.parquet'
-        
-        if not os.path.exists(data_path):
-            raise FileNotFoundError(f"Inference data not found: {data_path}")
-        
-        df = pd.read_parquet(data_path)
-        logger.info(f"✅ Loaded inference data: {len(df)} customers")
-        return df
+        try:
+            # Load recent inference data from S3
+            logger.info(f"🔍 Loading recent inference data from S3 (last {months_recent} months)...")
+            s3_manager = get_s3_manager()
+            s3_manager.load_inference_data_from_s3(months_recent)
+            logger.info("✅ Recent inference data loaded from S3")
+            
+            # Load the inference dataset (recent data)
+            if data_path is None:
+                data_path = 'data_pipelines/unified_dataset/output/recent_customer_dataset.parquet'
+            
+            if os.path.exists(data_path):
+                df = pd.read_parquet(data_path)
+                logger.info(f"✅ Loaded recent inference data: {len(df)} customers")
+                logger.info(f"📅 This dataset contains recent data for model inference (last {months_recent} months)")
+                return df
+            else:
+                logger.error(f"❌ Recent inference dataset not found at {data_path}")
+                raise FileNotFoundError(f"Recent inference dataset not found: {data_path}")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to load recent inference data: {e}")
+            raise
     
     def prepare_campaign_features(self, df, model_name):
         """Prepare features for campaign optimization"""
         logger.info(f"🔧 Preparing features for {model_name}...")
         
-        # Get feature columns from metadata
-        feature_columns = self.metadata[model_name]['feature_columns']
+        # Get feature columns from metadata or use default if not loaded yet
+        if model_name in self.metadata:
+            feature_columns = self.metadata[model_name]['feature_columns']
+        else:
+            # Use default feature columns if metadata not loaded yet
+            if model_name == 'campaign_success':
+                feature_columns = [
+                    'recency_days', 'frequency', 'monetary_value',
+                    'avg_order_value', 'customer_lifetime_value',
+                    'campaign_count', 'avg_roas', 'avg_ctr', 'total_campaign_revenue',
+                    'campaign_response_rate', 'avg_ctr_lift', 'rfm_score',
+                    'total_sessions', 'total_events',
+                    'conversion_probability', 'churn_risk', 'upsell_potential'
+                ]
+            elif model_name == 'budget_optimization':
+                feature_columns = [
+                    'recency_days', 'frequency', 'monetary_value',
+                    'avg_order_value', 'customer_lifetime_value',
+                    'campaign_count', 'avg_roas', 'total_campaign_revenue',
+                    'rfm_score', 'conversion_probability'
+                ]
+            else:
+                logger.error(f"❌ Unknown model name: {model_name}")
+                return None
         
         # Select available features
         available_features = [col for col in feature_columns if col in df.columns]
@@ -115,14 +163,24 @@ class CampaignOptimizationBatchInference:
         
         if missing_features:
             logger.warning(f"⚠️ Missing features for {model_name}: {missing_features}")
+            # Create missing features with sensible defaults
             for feature in missing_features:
-                df[feature] = 0
+                if 'count' in feature or 'total' in feature:
+                    df[feature] = 0
+                elif 'avg' in feature or 'rate' in feature:
+                    df[feature] = 1.0
+                elif 'score' in feature:
+                    df[feature] = 50.0
+                elif 'days' in feature:
+                    df[feature] = 365
+                else:
+                    df[feature] = 0
         
         # Select features and handle missing values
         df_features = df[['customer_id'] + feature_columns].copy()
         df_features = df_features.fillna(0)
         
-        logger.info(f"✅ Prepared {len(df_features)} customers for {model_name}")
+        logger.info(f"✅ Prepared {len(df_features)} customers for {model_name} with {len(available_features)} available features")
         return df_features
     
     def perform_campaign_success_prediction(self, df_features):
@@ -366,9 +424,9 @@ class CampaignOptimizationBatchInference:
         logger.info(f"✅ Visualizations saved to {output_dir}")
         return created_files
     
-    def run_batch_inference(self, data_path=None, models=None):
-        """Run batch inference for campaign optimization models"""
-        logger.info("🚀 Starting Campaign Optimization Batch Inference...")
+    def run_batch_inference(self, months_recent=3, data_path=None, models=None):
+        """Run batch inference for campaign optimization models on recent data"""
+        logger.info(f"🚀 Starting Campaign Optimization Batch Inference (last {months_recent} months)...")
         
         try:
             # Ensure latest models are available locally from S3 (no sync, pull latest files)
@@ -380,8 +438,8 @@ class CampaignOptimizationBatchInference:
             # Load models
             self.load_trained_models()
             
-            # Load data
-            df = self.load_inference_data(data_path)
+            # Load recent inference data
+            df = self.load_inference_data(months_recent, data_path)
             
             # Determine which models to run
             if models is None:
@@ -447,14 +505,29 @@ class CampaignOptimizationBatchInference:
             raise
 
 def main():
-    """Main function"""
+    """Main function - demonstrates parameterized inference periods"""
     try:
         inference = CampaignOptimizationBatchInference()
-        results = inference.run_batch_inference()
+        
+        # Run inference on different time periods
+        print("🚀 Running Campaign Optimization Batch Inference...")
+        
+        # Default: last 3 months
+        print("\n📊 Running inference on last 3 months (default)...")
+        results_3m = inference.run_batch_inference(months_recent=3)
+        
+        # Last 2 months
+        print("\n📊 Running inference on last 2 months...")
+        results_2m = inference.run_batch_inference(months_recent=2)
+        
+        # Last 1 month
+        print("\n📊 Running inference on last 1 month...")
+        results_1m = inference.run_batch_inference(months_recent=1)
         
         print(f"\n🎉 Campaign Optimization Batch Inference completed successfully!")
         print(f"📊 Results saved to models/campaign_optimization/inference_results/")
         print(f"📢 Ready for campaign optimization!")
+        print(f"⏰ Inference periods: 1 month ({len(results_1m)} models), 2 months ({len(results_2m)} models), 3 months ({len(results_3m)} models)")
         
     except Exception as e:
         logger.error(f"Fatal error: {e}")

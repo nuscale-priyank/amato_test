@@ -39,20 +39,28 @@ class ForecastingPipeline:
         with open(config_path, 'r') as file:
             return yaml.safe_load(file)
     
-    def load_unified_data(self):
-        """Load unified dataset for forecasting"""
+    def load_data(self):
+        """Load historical training data for forecasting (before 3 months ago)"""
         try:
-            # Load from parquet file
+            # Load historical training data from S3
+            logger.info("🔍 Loading historical training data from S3...")
+            s3_manager = get_s3_manager()
+            s3_manager.load_training_data_from_s3()
+            logger.info("✅ Historical training data loaded from S3")
+            
+            # Load the training dataset (historical data)
             data_path = 'data_pipelines/unified_dataset/output/unified_customer_dataset.parquet'
+            
             if os.path.exists(data_path):
                 df = pd.read_parquet(data_path)
-                logger.info(f"Loaded unified dataset: {df.shape}")
+                logger.info(f"✅ Loaded historical training dataset: {df.shape}")
+                logger.info(f"📅 This dataset contains historical data for model training")
                 return df
             else:
-                logger.error(f"Unified dataset not found: {data_path}")
+                logger.error(f"❌ Historical training dataset not found at {data_path}")
                 return None
         except Exception as e:
-            logger.error(f"Error loading unified data: {e}")
+            logger.error(f"❌ Failed to load historical training data: {e}")
             return None
     
     def prepare_forecasting_features(self, df):
@@ -196,30 +204,55 @@ class ForecastingPipeline:
         
         return model
     
-    def train_all_models(self):
-        """Train all forecasting models"""
-        logger.info("🚀 Starting Forecasting Pipeline Training...")
+    def run_training_pipeline(self):
+        """Run the complete forecasting training pipeline"""
+        logger.info("🚀 Starting Forecasting Training Pipeline...")
         
-        # Load data
-        df = self.load_unified_data()
-        if df is None:
-            logger.error("Failed to load unified data")
-            return False
+        try:
+            # Load data
+            df = self.load_data()
+            if df is None:
+                raise Exception("Failed to load data")
+            
+            # Prepare features
+            df = self.prepare_forecasting_features(df)
+            
+            # Train models
+            revenue_model = self.train_revenue_forecasting_model(df)
+            ctr_model = self.train_ctr_forecasting_model(df)
+            
+            if revenue_model and ctr_model:
+                logger.info("=" * 60)
+                logger.info("🎉 FORECASTING TRAINING COMPLETED!")
+                logger.info("=" * 60)
+                logger.info(f"📊 Trained 2 models on {len(df)} customers")
+                logger.info("💾 Models saved and ready for inference!")
+                
+                return {
+                    'revenue_forecasting': revenue_model,
+                    'ctr_forecasting': ctr_model
+                }
+            else:
+                raise Exception("Some forecasting models failed to train")
+                
+        except Exception as e:
+            logger.error(f"❌ Error in training pipeline: {e}")
+            raise
+
+def main():
+    """Main function to run the training pipeline"""
+    try:
+        # Initialize and run the pipeline
+        pipeline = ForecastingPipeline()
+        results = pipeline.run_training_pipeline()
         
-        # Prepare features
-        df = self.prepare_forecasting_features(df)
+        print("\n🎉 Forecasting Training completed successfully!")
+        print(f"📊 Trained {len(results)} models")
+        print("💾 Models saved and ready for inference!")
         
-        # Train models
-        revenue_model = self.train_revenue_forecasting_model(df)
-        ctr_model = self.train_ctr_forecasting_model(df)
-        
-        if revenue_model and ctr_model:
-            logger.info("✅ All forecasting models trained successfully!")
-            return True
-        else:
-            logger.error("❌ Some forecasting models failed to train")
-            return False
+    except Exception as e:
+        logger.error(f"❌ Training pipeline failed: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    pipeline = ForecastingPipeline()
-    pipeline.train_all_models()
+    main()

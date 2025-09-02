@@ -8,8 +8,10 @@ import os
 import yaml
 import boto3
 import logging
+import joblib
 from pathlib import Path
 from typing import List, Dict, Optional, Union
+from datetime import datetime, timedelta
 from botocore.exceptions import ClientError, NoCredentialsError
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,20 @@ class S3Manager:
     
     def __init__(self, config_path: str = "config/s3_config.yaml"):
         """Initialize S3 manager with configuration"""
+        # Auto-detect config path based on execution context
+        if config_path == "config/s3_config.yaml":
+            # Try to find the config file relative to current working directory
+            current_dir = Path.cwd()
+            if (current_dir / "config" / "s3_config.yaml").exists():
+                config_path = str(current_dir / "config" / "s3_config.yaml")
+            elif (current_dir.parent / "config" / "s3_config.yaml").exists():
+                config_path = str(current_dir.parent / "config" / "s3_config.yaml")
+            elif (current_dir.parent.parent / "config" / "s3_config.yaml").exists():
+                config_path = str(current_dir.parent.parent / "config" / "s3_config.yaml")
+            else:
+                # Fallback to default
+                config_path = "config/s3_config.yaml"
+        
         self.config = self._load_config(config_path)
         self.s3_client = boto3.client('s3')
         self.bucket = self.config['s3']['bucket']
@@ -129,10 +145,9 @@ class S3Manager:
                     if file_types and not any(s3_key.lower().endswith(ft) for ft in file_types):
                         continue
                     
-                    # Calculate local path
-                    relative_path = s3_key.replace(f"{self.base_path}/", "")
-                    local_file_path = local_path / relative_path
-                    local_file_path.parent.mkdir(parents=True, exist_ok=True)
+                    # Calculate local path - flatten to avoid nested directories
+                    filename = os.path.basename(s3_key)
+                    local_file_path = local_path / filename
                     
                     try:
                         logger.info(f"Downloading s3://{self.bucket}/{s3_key} to {local_file_path}")
@@ -282,10 +297,135 @@ class S3Manager:
             local_data_dir, 
             file_types=self.config['file_types']['data']
         )
+    
+    def upload_bytes_direct(self, data: bytes, s3_key: str, content_type: str = None) -> bool:
+        """Upload bytes directly to S3 without local file creation"""
+        try:
+            if content_type is None:
+                # Auto-detect content type from file extension
+                if s3_key.endswith('.pkl'):
+                    content_type = 'application/octet-stream'
+                elif s3_key.endswith('.yaml') or s3_key.endswith('.yml'):
+                    content_type = 'text/yaml'
+                elif s3_key.endswith('.json'):
+                    content_type = 'application/json'
+                elif s3_key.endswith('.parquet'):
+                    content_type = 'application/octet-stream'
+                else:
+                    content_type = 'application/octet-stream'
+            
+            logger.info(f"Uploading bytes directly to s3://{self.bucket}/{s3_key}")
+            self.s3_client.put_object(
+                Bucket=self.bucket,
+                Key=s3_key,
+                Body=data,
+                ContentType=content_type
+            )
+            logger.info(f"Successfully uploaded bytes to s3://{self.bucket}/{s3_key}")
+            return True
+            
+        except (ClientError, NoCredentialsError) as e:
+            logger.error(f"Error uploading bytes to {s3_key}: {e}")
+            return False
+    
+    def upload_model_direct(self, model, model_name: str, model_type: str, metadata: Dict = None) -> bool:
+        """Upload model directly to S3 without local storage"""
+        try:
+            # Serialize model to bytes using BytesIO
+            import io
+            buffer = io.BytesIO()
+            joblib.dump(model, buffer)
+            model_bytes = buffer.getvalue()
+            
+            # Create S3 key
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            s3_key = f"{self.base_path}/models/{model_type}/{model_name}_{timestamp}.pkl"
+            
+            # Upload model bytes
+            success = self.upload_bytes_direct(model_bytes, s3_key)
+            
+            if success and metadata:
+                # Upload metadata
+                metadata_bytes = yaml.dump(metadata, default_flow_style=False).encode('utf-8')
+                metadata_key = f"{self.base_path}/models/{model_type}/{model_name}_metadata_{timestamp}.yaml"
+                self.upload_bytes_direct(metadata_bytes, metadata_key, 'text/yaml')
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error uploading model {model_name}: {e}")
+            return False
+    
+    def load_training_data_from_s3(self, local_data_dir: str = "data_pipelines/unified_dataset/output") -> Dict[str, bool]:
+        """Load historical training data from S3 (anything before 3 months ago)"""
+        logger.info("Loading historical training data from S3...")
+        return self.download_directory(
+            f"{self.base_path}/data_pipelines/unified_dataset/output/", 
+            local_data_dir, 
+            file_types=self.config['file_types']['data']
+        )
+    
+    def load_inference_data_from_s3(self, months_recent: int = 3, local_data_dir: str = "data_pipelines/unified_dataset/output") -> Dict[str, bool]:
+        """Load recent inference data from S3 (last 1, 2, or 3 months)"""
+        logger.info(f"Loading recent inference data from S3 (last {months_recent} months)...")
+        
+        # Calculate cutoff date
+        cutoff_date = datetime.now() - timedelta(days=months_recent * 30)
+        cutoff_timestamp = cutoff_date.strftime('%Y-%m-%d')
+        
+        logger.info(f"Loading data newer than {cutoff_timestamp}")
+        
+        # For now, download all data and filter locally
+        # In production, this could be optimized with S3 Select or Athena queries
+        return self.download_directory(
+            f"{self.base_path}/data_pipelines/unified_dataset/output/", 
+            local_data_dir, 
+            file_types=self.config['file_types']['data']
+        )
+    
+    def get_data_timeline_info(self) -> Dict[str, str]:
+        """Get information about available data timelines"""
+        try:
+            # List available datasets and their timestamps
+            datasets = self.list_files_with_meta(f"{self.base_path}/data_pipelines/unified_dataset/output/")
+            
+            timeline_info = {
+                'training_data': 'unified_customer_dataset.parquet',  # Historical data
+                'inference_data': 'recent_customer_dataset.parquet',  # Recent data (configurable)
+                'available_timestamps': []
+            }
+            
+            for dataset in datasets:
+                if dataset['Key'].endswith('.parquet'):
+                    timeline_info['available_timestamps'].append({
+                        'file': dataset['Key'],
+                        'last_modified': dataset['LastModified'],
+                        'size': dataset['Size']
+                    })
+            
+            return timeline_info
+            
+        except Exception as e:
+            logger.error(f"Error getting data timeline info: {e}")
+            return {}
 
 
 def get_s3_manager(config_path: str = "config/s3_config.yaml") -> S3Manager:
     """Factory function to get S3 manager instance"""
+    # Auto-detect config path if not explicitly provided
+    if config_path == "config/s3_config.yaml":
+        # Try to find the config file relative to current working directory
+        current_dir = Path.cwd()
+        if (current_dir / "config" / "s3_config.yaml").exists():
+            config_path = str(current_dir / "config" / "s3_config.yaml")
+        elif (current_dir.parent / "config" / "s3_config.yaml").exists():
+            config_path = str(current_dir.parent / "config" / "s3_config.yaml")
+        elif (current_dir.parent.parent / "config" / "s3_config.yaml").exists():
+            config_path = str(current_dir.parent.parent / "config" / "s3_config.yaml")
+        else:
+            # Fallback to default
+            config_path = "config/s3_config.yaml"
+    
     return S3Manager(config_path)
 
 
@@ -322,3 +462,27 @@ def load_all_from_s3() -> Dict[str, Dict[str, bool]]:
         'data': s3_manager.load_data_from_s3()
     }
     return results
+
+
+def upload_model_direct(model, model_name: str, model_type: str, metadata: Dict = None) -> bool:
+    """Upload model directly to S3 without local storage"""
+    s3_manager = get_s3_manager()
+    return s3_manager.upload_model_direct(model, model_name, model_type, metadata)
+
+
+def load_training_data_from_s3(local_data_dir: str = "data_pipelines/unified_dataset/output") -> Dict[str, bool]:
+    """Load historical training data from S3 (anything before 3 months ago)"""
+    s3_manager = get_s3_manager()
+    return s3_manager.load_training_data_from_s3(local_data_dir)
+
+
+def load_inference_data_from_s3(months_recent: int = 3, local_data_dir: str = "data_pipelines/unified_dataset/output") -> Dict[str, bool]:
+    """Load recent inference data from S3 (last 1, 2, or 3 months)"""
+    s3_manager = get_s3_manager()
+    return s3_manager.load_inference_data_from_s3(months_recent, local_data_dir)
+
+
+def get_data_timeline_info() -> Dict[str, str]:
+    """Get information about available data timelines"""
+    s3_manager = get_s3_manager()
+    return s3_manager.get_data_timeline_info()
