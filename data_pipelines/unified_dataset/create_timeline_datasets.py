@@ -29,19 +29,46 @@ logger = logging.getLogger(__name__)
 class TimelineDatasetCreator:
     """Creates timeline-based datasets for training and inference"""
     
-    def __init__(self, config_path='config/database_config.yaml'):
+    def __init__(self, config_path='amato_pm/config/database_config.yaml'):
         self.config = self.load_config(config_path)
         self.output_dir = 'data_pipelines/unified_dataset/output'
         os.makedirs(self.output_dir, exist_ok=True)
         
     def load_config(self, config_path):
-        """Load configuration file"""
+        """Load configuration from S3 or local fallback"""
         try:
-            with open(config_path, 'r') as f:
-                return yaml.safe_load(f)
+            # First try to load from S3
+            logger.info("🔍 Loading database config from S3...")
+            s3_manager = get_s3_manager()
+            
+            # Download config from S3 to temporary location
+            temp_config_path = '/tmp/database_config_temp.yaml'
+            s3_manager.download_file(config_path, temp_config_path)
+            
+            # Load the config
+            with open(temp_config_path, 'r') as f:
+                config = yaml.safe_load(f)
+            
+            # Clean up temp file
+            os.remove(temp_config_path)
+            
+            logger.info("✅ Database config loaded from S3")
+            return config
+            
         except Exception as e:
-            logger.warning(f"Failed to load config: {e}")
-            return {}
+            logger.warning(f"⚠️  Failed to load config from S3: {e}")
+            logger.info("🔄 Falling back to local config...")
+            
+            # Fallback to local config
+            local_config_path = 'config/database_config.yaml'
+            if os.path.exists(local_config_path):
+                with open(local_config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                logger.info("✅ Database config loaded from local file")
+                return config
+            else:
+                logger.warning(f"Failed to load config: {e}")
+                return {}
     
     def load_unified_dataset(self):
         """Load the unified dataset"""

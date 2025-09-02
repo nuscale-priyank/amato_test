@@ -27,14 +27,44 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class UnifiedDatasetCreator:
-    def __init__(self, config_path='config/database_config.yaml'):
+    def __init__(self, config_path='amato_pm/config/database_config.yaml'):
         self.config = self.load_config(config_path)
         self.trino_engine = None
         
     def load_config(self, config_path):
-        """Load configuration from YAML file"""
-        with open(config_path, 'r') as file:
-            return yaml.safe_load(file)
+        """Load configuration from S3 or local fallback"""
+        try:
+            # First try to load from S3
+            logger.info("🔍 Loading database config from S3...")
+            s3_manager = get_s3_manager()
+            
+            # Download config from S3 to temporary location
+            temp_config_path = '/tmp/database_config_temp.yaml'
+            s3_manager.download_file(config_path, temp_config_path)
+            
+            # Load the config
+            with open(temp_config_path, 'r') as file:
+                config = yaml.safe_load(file)
+            
+            # Clean up temp file
+            os.remove(temp_config_path)
+            
+            logger.info("✅ Database config loaded from S3")
+            return config
+            
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to load config from S3: {e}")
+            logger.info("🔄 Falling back to local config...")
+            
+            # Fallback to local config
+            local_config_path = 'config/database_config.yaml'
+            if os.path.exists(local_config_path):
+                with open(local_config_path, 'r') as file:
+                    config = yaml.safe_load(file)
+                logger.info("✅ Database config loaded from local file")
+                return config
+            else:
+                raise Exception(f"❌ No config file found locally or in S3: {local_config_path}")
     
     def connect_trino(self):
         """Connect to Trino"""
