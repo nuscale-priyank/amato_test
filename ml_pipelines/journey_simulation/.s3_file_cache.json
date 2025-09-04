@@ -1,0 +1,23 @@
+{
+  "nuscale-data-services-public:amato_pm/data_pipelines/unified_dataset/output/recent_customer_dataset.parquet": {
+    "etag": "51842d7b2b7cf4a635afbc331e1c6c9a",
+    "size": 231286,
+    "last_modified": "2025-09-04T14:12:02+00:00",
+    "local_path": "data_pipelines/unified_dataset/output/recent_customer_dataset.parquet",
+    "cached_at": "2025-09-04T11:36:24.821445"
+  },
+  "nuscale-data-services-public:amato_pm/data_pipelines/unified_dataset/output/timeline_datasets_metadata.yaml": {
+    "etag": "6c5547e1935b80b844037f038dee76ce",
+    "size": 474,
+    "last_modified": "2025-09-04T14:12:02+00:00",
+    "local_path": "data_pipelines/unified_dataset/output/timeline_datasets_metadata.yaml",
+    "cached_at": "2025-09-04T11:36:25.105276"
+  },
+  "nuscale-data-services-public:amato_pm/data_pipelines/unified_dataset/output/unified_customer_dataset.parquet": {
+    "etag": "f13bfa993635a382a9d34100e260f014",
+    "size": 1237452,
+    "last_modified": "2025-09-04T14:12:02+00:00",
+    "local_path": "data_pipelines/unified_dataset/output/unified_customer_dataset.parquet",
+    "cached_at": "2025-09-04T11:36:25.273819"
+  }
+}
