@@ -9,6 +9,8 @@ import yaml
 import boto3
 import logging
 import joblib
+import hashlib
+import json
 from pathlib import Path
 from typing import List, Dict, Optional, Union
 from datetime import datetime, timedelta
@@ -41,6 +43,69 @@ class S3Manager:
         self.bucket = self.config['s3']['bucket']
         self.base_path = self.config['s3']['base_path']
         
+        # Cache for file metadata to avoid unnecessary downloads
+        self._file_cache_file = Path(".s3_file_cache.json")
+        self._file_cache = self._load_file_cache()
+        
+    def _load_file_cache(self) -> Dict[str, Dict]:
+        """Load file cache from disk"""
+        if self._file_cache_file.exists():
+            try:
+                with open(self._file_cache_file, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                logger.warning("Failed to load file cache, starting fresh")
+        return {}
+    
+    def _save_file_cache(self):
+        """Save file cache to disk"""
+        try:
+            with open(self._file_cache_file, 'w') as f:
+                json.dump(self._file_cache, f, indent=2, default=str)
+        except IOError as e:
+            logger.warning(f"Failed to save file cache: {e}")
+    
+    def _get_file_cache_key(self, s3_key: str) -> str:
+        """Generate cache key for a file"""
+        return f"{self.bucket}:{s3_key}"
+    
+    def _is_file_changed(self, s3_key: str, local_path: str) -> bool:
+        """Check if a file has changed and needs to be downloaded"""
+        cache_key = self._get_file_cache_key(s3_key)
+        
+        # If file doesn't exist locally, it needs to be downloaded
+        if not os.path.exists(local_path):
+            return True
+        
+        # Get S3 object metadata
+        try:
+            response = self.s3_client.head_object(Bucket=self.bucket, Key=s3_key)
+            s3_etag = response.get('ETag', '').strip('"')
+            s3_last_modified = response.get('LastModified')
+            s3_size = response.get('ContentLength', 0)
+        except ClientError:
+            logger.warning(f"Could not get metadata for {s3_key}, downloading anyway")
+            return True
+        
+        # Check cache
+        if cache_key in self._file_cache:
+            cached = self._file_cache[cache_key]
+            if (cached.get('etag') == s3_etag and 
+                cached.get('size') == s3_size and
+                cached.get('last_modified') == s3_last_modified.isoformat()):
+                return False
+        
+        # Update cache
+        self._file_cache[cache_key] = {
+            'etag': s3_etag,
+            'size': s3_size,
+            'last_modified': s3_last_modified.isoformat(),
+            'local_path': str(local_path),
+            'cached_at': datetime.now().isoformat()
+        }
+        
+        return True
+    
     def _load_config(self, config_path: str) -> Dict:
         """Load S3 configuration from YAML file"""
         try:
@@ -77,15 +142,22 @@ class S3Manager:
             return False
     
     def download_file(self, s3_key: str, local_path: str, overwrite: bool = True) -> bool:
-        """Download a single file from S3"""
+        """Download a single file from S3 with smart caching"""
         try:
-            if not overwrite and os.path.exists(local_path):
-                logger.info(f"File already exists locally: {local_path}")
+            # Check if file needs to be downloaded
+            if not overwrite and not self._is_file_changed(s3_key, local_path):
+                logger.info(f"File unchanged, skipping download: {s3_key}")
                 return True
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
             
             logger.info(f"Downloading s3://{self.bucket}/{s3_key} to {local_path}")
             self.s3_client.download_file(self.bucket, s3_key, local_path)
             logger.info(f"Successfully downloaded {s3_key}")
+            
+            # Save cache after successful download
+            self._save_file_cache()
             return True
             
         except (ClientError, NoCredentialsError) as e:
@@ -124,7 +196,7 @@ class S3Manager:
     
     def download_directory(self, s3_prefix: str, local_dir: str, 
                           file_types: Optional[List[str]] = None) -> Dict[str, bool]:
-        """Download all files from S3 prefix to local directory"""
+        """Download all files from S3 prefix to local directory with smart caching"""
         results = {}
         local_path = Path(local_dir)
         local_path.mkdir(parents=True, exist_ok=True)
@@ -149,13 +221,21 @@ class S3Manager:
                     filename = os.path.basename(s3_key)
                     local_file_path = local_path / filename
                     
+                    # Use smart caching for individual files
                     try:
-                        logger.info(f"Downloading s3://{self.bucket}/{s3_key} to {local_file_path}")
-                        self.s3_client.download_file(self.bucket, s3_key, str(local_file_path))
-                        results[s3_key] = True
+                        if self._is_file_changed(s3_key, str(local_file_path)):
+                            logger.info(f"Downloading s3://{self.bucket}/{s3_key} to {local_file_path}")
+                            self.s3_client.download_file(self.bucket, s3_key, str(local_file_path))
+                            results[s3_key] = True
+                        else:
+                            logger.info(f"File unchanged, skipping: {s3_key}")
+                            results[s3_key] = True  # Mark as successful since it's already up to date
                     except (ClientError, NoCredentialsError) as e:
                         logger.error(f"Error downloading {s3_key}: {e}")
                         results[s3_key] = False
+            
+            # Save cache after all downloads
+            self._save_file_cache()
                         
         except (ClientError, NoCredentialsError) as e:
             logger.error(f"Error listing S3 objects: {e}")
@@ -174,8 +254,10 @@ class S3Manager:
         """List all files in S3 prefix"""
         files = []
         try:
+            # Construct full S3 path with base path
+            full_prefix = f"{self.base_path}/{s3_prefix}" if not s3_prefix.startswith(self.base_path) else s3_prefix
             paginator = self.s3_client.get_paginator('list_objects_v2')
-            pages = paginator.paginate(Bucket=self.bucket, Prefix=s3_prefix)
+            pages = paginator.paginate(Bucket=self.bucket, Prefix=full_prefix)
             
             for page in pages:
                 if 'Contents' in page:
@@ -190,8 +272,10 @@ class S3Manager:
         """List files with metadata (Key, LastModified, Size) in S3 prefix"""
         objects: List[Dict[str, str]] = []
         try:
+            # Construct full S3 path with base path
+            full_prefix = f"{self.base_path}/{s3_prefix}" if not s3_prefix.startswith(self.base_path) else s3_prefix
             paginator = self.s3_client.get_paginator('list_objects_v2')
-            pages = paginator.paginate(Bucket=self.bucket, Prefix=s3_prefix)
+            pages = paginator.paginate(Bucket=self.bucket, Prefix=full_prefix)
             for page in pages:
                 if 'Contents' in page:
                     for obj in page['Contents']:
@@ -205,7 +289,7 @@ class S3Manager:
         return objects
 
     def download_latest_by_suffix(self, s3_subdir: str, local_dir: str, suffixes: List[str]) -> Dict[str, Optional[str]]:
-        """Download the latest file for each suffix under a subdir. Returns mapping suffix->local_path."""
+        """Download the latest file for each suffix under a subdir with smart caching. Returns mapping suffix->local_path."""
         results: Dict[str, Optional[str]] = {suffix: None for suffix in suffixes}
         prefix = f"{self.base_path}/{s3_subdir}".rstrip('/') + '/'
         objects = self.list_files_with_meta(prefix)
@@ -225,12 +309,21 @@ class S3Manager:
             relative = key.replace(f"{self.base_path}/", "")
             local_file = local_path_obj / relative
             local_file.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                logger.info(f"Downloading latest {suffix} from {key} -> {local_file}")
-                self.s3_client.download_file(self.bucket, key, str(local_file))
+            
+            # Use smart caching
+            if self._is_file_changed(key, str(local_file)):
+                try:
+                    logger.info(f"Downloading latest {suffix} from {key} -> {local_file}")
+                    self.s3_client.download_file(self.bucket, key, str(local_file))
+                    results[suffix] = str(local_file)
+                except (ClientError, NoCredentialsError) as e:
+                    logger.error(f"Error downloading latest {suffix} from {key}: {e}")
+            else:
+                logger.info(f"Latest {suffix} unchanged, using cached version: {local_file}")
                 results[suffix] = str(local_file)
-            except (ClientError, NoCredentialsError) as e:
-                logger.error(f"Error downloading latest {suffix} from {key}: {e}")
+        
+        # Save cache after all downloads
+        self._save_file_cache()
         return results
     
     def delete_file(self, s3_key: str) -> bool:
@@ -281,8 +374,8 @@ class S3Manager:
         return results
     
     def load_models_from_s3(self, local_models_dir: str = "models") -> Dict[str, bool]:
-        """Load all model files from S3"""
-        logger.info("Loading models from S3...")
+        """Load all model files from S3 with smart caching"""
+        logger.info("Loading models from S3 with smart caching...")
         return self.download_directory(
             f"{self.base_path}/models/", 
             local_models_dir, 
@@ -290,8 +383,8 @@ class S3Manager:
         )
     
     def load_data_from_s3(self, local_data_dir: str = "data_pipelines/unified_dataset/output") -> Dict[str, bool]:
-        """Load data pipeline outputs from S3"""
-        logger.info("Loading data pipeline outputs from S3...")
+        """Load data pipeline outputs from S3 with smart caching"""
+        logger.info("Loading data pipeline outputs from S3 with smart caching...")
         return self.download_directory(
             f"{self.base_path}/data_pipelines/unified_dataset/output/", 
             local_data_dir, 
@@ -357,8 +450,8 @@ class S3Manager:
             return False
     
     def load_training_data_from_s3(self, local_data_dir: str = "data_pipelines/unified_dataset/output") -> Dict[str, bool]:
-        """Load historical training data from S3 (anything before 3 months ago)"""
-        logger.info("Loading historical training data from S3...")
+        """Load historical training data from S3 with smart caching"""
+        logger.info("Loading historical training data from S3 with smart caching...")
         return self.download_directory(
             f"{self.base_path}/data_pipelines/unified_dataset/output/", 
             local_data_dir, 
@@ -366,8 +459,8 @@ class S3Manager:
         )
     
     def load_inference_data_from_s3(self, months_recent: int = 3, local_data_dir: str = "data_pipelines/unified_dataset/output") -> Dict[str, bool]:
-        """Load recent inference data from S3 (last 1, 2, or 3 months)"""
-        logger.info(f"Loading recent inference data from S3 (last {months_recent} months)...")
+        """Load recent inference data from S3 with smart caching"""
+        logger.info(f"Loading recent inference data from S3 with smart caching (last {months_recent} months)...")
         
         # Calculate cutoff date
         cutoff_date = datetime.now() - timedelta(days=months_recent * 30)
@@ -409,6 +502,20 @@ class S3Manager:
             logger.error(f"Error getting data timeline info: {e}")
             return {}
 
+    def clear_cache(self):
+        """Clear the file cache"""
+        self._file_cache = {}
+        if self._file_cache_file.exists():
+            self._file_cache_file.unlink()
+        logger.info("File cache cleared")
+
+    def get_cache_stats(self) -> Dict[str, int]:
+        """Get cache statistics"""
+        return {
+            'cached_files': len(self._file_cache),
+            'cache_file_size': self._file_cache_file.stat().st_size if self._file_cache_file.exists() else 0
+        }
+
 
 def get_s3_manager(config_path: str = "config/s3_config.yaml") -> S3Manager:
     """Factory function to get S3 manager instance"""
@@ -438,7 +545,7 @@ def upload_model_file(local_path: str, model_type: str) -> bool:
 
 
 def download_model_file(s3_key: str, local_path: str) -> bool:
-    """Download a single model file from S3"""
+    """Download a single model file from S3 with smart caching"""
     s3_manager = get_s3_manager()
     return s3_manager.download_file(s3_key, local_path)
 
@@ -455,7 +562,7 @@ def sync_all_to_s3() -> Dict[str, Dict[str, bool]]:
 
 
 def load_all_from_s3() -> Dict[str, Dict[str, bool]]:
-    """Load all AMATO files from S3"""
+    """Load all AMATO files from S3 with smart caching"""
     s3_manager = get_s3_manager()
     results = {
         'models': s3_manager.load_models_from_s3(),
@@ -471,13 +578,13 @@ def upload_model_direct(model, model_name: str, model_type: str, metadata: Dict 
 
 
 def load_training_data_from_s3(local_data_dir: str = "data_pipelines/unified_dataset/output") -> Dict[str, bool]:
-    """Load historical training data from S3 (anything before 3 months ago)"""
+    """Load historical training data from S3 with smart caching"""
     s3_manager = get_s3_manager()
     return s3_manager.load_training_data_from_s3(local_data_dir)
 
 
 def load_inference_data_from_s3(months_recent: int = 3, local_data_dir: str = "data_pipelines/unified_dataset/output") -> Dict[str, bool]:
-    """Load recent inference data from S3 (last 1, 2, or 3 months)"""
+    """Load recent inference data from S3 with smart caching"""
     s3_manager = get_s3_manager()
     return s3_manager.load_inference_data_from_s3(months_recent, local_data_dir)
 
@@ -486,3 +593,15 @@ def get_data_timeline_info() -> Dict[str, str]:
     """Get information about available data timelines"""
     s3_manager = get_s3_manager()
     return s3_manager.get_data_timeline_info()
+
+
+def clear_s3_cache():
+    """Clear the S3 file cache"""
+    s3_manager = get_s3_manager()
+    s3_manager.clear_cache()
+
+
+def get_s3_cache_stats() -> Dict[str, int]:
+    """Get S3 cache statistics"""
+    s3_manager = get_s3_manager()
+    return s3_manager.get_cache_stats()
